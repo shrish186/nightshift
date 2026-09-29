@@ -180,6 +180,11 @@ class CellConfig(_Strict):
                 raise ValueError("clamp_released_sensor is false but pins.unclamped_in is set")
             if self.unclamp_fallback is None:
                 raise ValueError("clamp_released_sensor is false: unclamp_fallback is required")
+            if self.timeouts_s.unclamp <= self.unclamp_fallback.release_wait_s:
+                raise ValueError(
+                    "timeouts_s.unclamp must be > unclamp_fallback.release_wait_s "
+                    "(the wait happens inside the UNCLAMP_FALLBACK state)"
+                )
             if self.unclamp_fallback.pull_pose not in self.poses:
                 raise ValueError(
                     f"unclamp_fallback.pull_pose {self.unclamp_fallback.pull_pose!r} not in poses"

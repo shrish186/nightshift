@@ -179,3 +179,10 @@ def test_plausibility_section_required(sim_cell_raw: dict[str, Any]) -> None:
     del raw["io_plausibility"]
     with pytest.raises(ValidationError):
         CellConfig.model_validate(raw)
+
+
+def test_unclamp_timeout_must_exceed_fallback_wait(sim_cell_raw: dict[str, Any]) -> None:
+    raw = _no_release_sensor(sim_cell_raw)
+    raw["timeouts_s"]["unclamp"] = raw["unclamp_fallback"]["release_wait_s"]
+    with pytest.raises(ValidationError, match=r"timeouts_s\.unclamp must be >"):
+        CellConfig.model_validate(raw)
