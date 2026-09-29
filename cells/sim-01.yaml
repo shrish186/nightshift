@@ -44,6 +44,7 @@ timeouts_s:
   clamp: 5
   retreat: 15
   machining_factor: 1.5  # MACHINING timeout = program expected_cycle_s x this
+  idle_door_close_s: 30  # close the machine door after this long idle
   watchman_wait_s: 120  # arm waits outside with the raw part for the watchman, then SAFE
   unclamp: 5
   unload: 20

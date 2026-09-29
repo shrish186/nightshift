@@ -464,10 +464,16 @@ class CellController:
         self._step_idx = 0
         self._step_issued = False
         self._step_started_at = 0.0
+        self._end_batch = False
+        self._door_close_commanded = False
 
     # --- public API ---
     def attach_watchman(self, link: WatchmanLink) -> None:
         self._watchman = link
+
+    def end_batch(self) -> None:
+        """No more cycles for now: close the door as soon as the cell is IDLE."""
+        self._end_batch = True
 
     def watchman_health(self) -> str | None:
         """None if an attached watchman is healthy, else why not (fails closed)."""
@@ -593,7 +599,12 @@ class CellController:
         if self.state is State.IDLE:
             if self._start_requested:
                 self._start_requested = False
+                self._end_batch = False
                 self._transition(State.PICK_RAW, "cycle started")
+                return
+            idle_s = self._clock.now() - self._entered_at
+            if self._end_batch or idle_s >= self._cfg.timeouts_s.idle_door_close_s:
+                self._close_door_if_arm_outside()
             return
 
         spec = STATE_TABLE.get(self.state)
@@ -695,10 +706,27 @@ class CellController:
         log_transition(log, src.value, dst.value, reason, now, self._cfg.cell_id)
         self.state = dst
         self._entered_at = now
+        self._door_close_commanded = False
         spec = STATE_TABLE.get(dst)
         self._steps = spec.steps(self._cfg) if spec is not None else ()
         self._step_idx = 0
         self._step_issued = False
+
+    def _close_door_if_arm_outside(self) -> str | None:
+        """Close the machine door, but only with the arm at a known pose outside the
+        machine and the e-stop/guard healthy. Returns why not, or None if commanded."""
+        c = self._ctx
+        if c.cnc.door_closed() and not c.cnc.door_open():
+            return None  # already closed
+        where = arm_outside_machine(c)
+        if where is not None:
+            return where
+        if not (self._safety.estop_ok() and self._safety.guard_closed()):
+            return "e-stop or guard"
+        if not self._door_close_commanded:
+            self._door_close_commanded = True
+            c.cnc.close_door()
+        return None
 
     def _enter_safe(self, reason: str) -> None:
         if self.state is State.SAFE:
@@ -710,6 +738,13 @@ class CellController:
                 action()
             except Exception as e:
                 errors.append(f"{label} failed: {type(e).__name__}: {e}")
+        try:
+            self._door_close_commanded = False
+            why_open = self._close_door_if_arm_outside()
+            if why_open is not None:
+                reason = f"{reason} [door left open: {why_open}]"
+        except Exception as e:
+            errors.append(f"door close failed: {type(e).__name__}: {e}")
         if errors:
             reason = f"{reason} [{'; '.join(errors)}]"
         prior = self.state

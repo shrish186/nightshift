@@ -107,6 +107,9 @@ class Timeouts(_Strict):
     # Max time the arm holds a raw part outside the machine waiting for an unhealthy
     # watchman (node offline) before going SAFE.
     watchman_wait_s: float = Field(gt=0)
+    # Close the machine door after this long in IDLE (kept open between back-to-back
+    # cycles). Also closed at end_batch() and on SAFE, only with the arm outside.
+    idle_door_close_s: float = Field(gt=0)
     unclamp: float = Field(gt=0)
     unload: float = Field(gt=0)
     place_done: float = Field(gt=0)

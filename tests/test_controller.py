@@ -664,3 +664,69 @@ def test_wait_watchman_passes_straight_through_when_healthy() -> None:
         len(waits) == 1
         and waits[0].ts - next(t.ts for t in ctrl.history if t.dst is S.WAIT_WATCHMAN) <= 0.2
     )
+
+
+# --- door closes when idle / end of batch / SAFE (never onto the arm) ---
+
+
+def _idle_for(cell: SimCell, ctrl: CellController, seconds: float) -> None:
+    for _ in range(round(seconds / 0.1)):
+        ctrl.step()
+        cell.clock.advance(0.1)
+
+
+def test_door_stays_open_between_back_to_back_cycles() -> None:
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    run_one_cycle(cell, ctrl)
+    assert cell.cnc.door() == "open"
+    run_one_cycle(cell, ctrl)  # started straight away
+    assert ctrl.cycles_completed == 2 and cell.cnc.door() == "open"
+
+
+def test_door_closes_after_idle_timeout() -> None:
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    run_one_cycle(cell, ctrl)
+    limit = cell.cfg.timeouts_s.idle_door_close_s
+    _idle_for(cell, ctrl, limit - 0.5)
+    assert cell.cnc.door() == "open"
+    _idle_for(cell, ctrl, 0.5 + cell.cfg.io_plausibility.door_travel_s + 0.5)
+    assert cell.cnc.door() == "closed" and cell.cnc.door_closed()
+    assert cell.violations == []
+
+
+def test_end_batch_closes_the_door_now() -> None:
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    run_one_cycle(cell, ctrl)
+    ctrl.end_batch()
+    _idle_for(cell, ctrl, cell.cfg.io_plausibility.door_travel_s + 0.5)
+    assert cell.cnc.door() == "closed"
+
+
+def test_safe_with_arm_outside_closes_door_and_reset_needs_no_manual_close() -> None:
+    cell = new_cell()
+    ctrl, alerter = make(cell)
+    assert ctrl.start_cycle(PROGRAM)
+    run_one_cycle_until(cell, ctrl, S.PLACE_DONE)  # door open, arm outside
+    ctrl.request_safe("test")
+    _idle_for(cell, ctrl, 0.1)
+    assert ctrl.state.value == S.SAFE.value
+    _idle_for(cell, ctrl, cell.cfg.io_plausibility.door_travel_s + 0.5)
+    assert cell.cnc.door() == "closed"
+    assert "door left open" not in alerter.alerts[0].reason
+    cell.cnc.operator_clear()
+    assert ctrl.reset("asha") is None
+
+
+def test_safe_with_arm_inside_leaves_door_open() -> None:
+    cell = new_cell()
+    ctrl, alerter = make(cell)
+    assert ctrl.start_cycle(PROGRAM)
+    run_one_cycle_until(cell, ctrl, S.CLAMP)  # arm at load, inside the machine
+    ctrl.request_safe("test")
+    _idle_for(cell, ctrl, 5)
+    assert cell.cnc.door() == "open"
+    assert "door left open" in alerter.alerts[0].reason
+    assert cell.violations == []
