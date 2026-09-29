@@ -12,9 +12,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Generator, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 
 from hypothesis import strategies as st
 
@@ -90,6 +90,80 @@ def make_cfg(no_release_sensor: bool = False) -> CellConfig:
 
 def new_cell(no_release_sensor: bool = False, seed: int = 0) -> SimCell:
     return build_sim_cell(make_cfg(no_release_sensor), seed=seed, cycle_s=CYCLE_S)
+
+
+class Runner(Protocol):
+    """What the harness drives: CautiousScript now, the real controller from step 3."""
+
+    done: bool
+    stopped: bool
+    stop_reason: str
+
+    def step(self) -> bool: ...
+
+
+@dataclass(frozen=True)
+class NoFaultVariation:
+    """Everything that varies between runs when the fault injector is disabled."""
+
+    seed: int
+    no_release_sensor: bool
+    door_scale: float  # real stroke time vs. the configured measured travel
+    clamp_scale: float
+    robot_speed_scale: float
+    cycle_s: float
+
+
+def no_fault_variations() -> st.SearchStrategy[NoFaultVariation]:
+    # Stroke times stay within measured travel +/- a little, always inside the
+    # plausibility window (a slower real machine means the config was measured wrong).
+    return st.builds(
+        NoFaultVariation,
+        seed=st.integers(min_value=0, max_value=2**16),
+        no_release_sensor=st.booleans(),
+        door_scale=st.floats(min_value=0.8, max_value=1.1),
+        clamp_scale=st.floats(min_value=0.8, max_value=1.1),
+        robot_speed_scale=st.floats(min_value=0.8, max_value=1.2),
+        cycle_s=st.floats(min_value=5.0, max_value=20.0),
+    )
+
+
+def cell_for(v: NoFaultVariation) -> SimCell:
+    cfg = make_cfg(v.no_release_sensor)
+    p = cfg.io_plausibility
+    return build_sim_cell(
+        cfg,
+        seed=v.seed,
+        cycle_s=v.cycle_s,
+        door_s=p.door_travel_s * v.door_scale,
+        clamp_s=p.clamp_travel_s * v.clamp_scale,
+        robot_speed_scale=v.robot_speed_scale,
+    )
+
+
+@dataclass
+class CycleResult:
+    completed: int = 0
+    stops: list[str] = field(default_factory=list)
+
+
+def run_cycles(
+    cell: SimCell, new_runner: Callable[[SimCell], Runner], n_cycles: int
+) -> CycleResult:
+    """Run n back-to-back cycles with no faults injected. Stops at the first stop."""
+    result = CycleResult()
+    for _ in range(n_cycles):
+        runner = new_runner(cell)
+        run_with_faults(cell, runner.step)
+        if not runner.done:
+            result.stops.append(runner.stop_reason or "did not finish")
+            break
+        result.completed += 1
+    return result
+
+
+# Session-wide false-stop tally, printed by tests/conftest.py at the end of pytest.
+FALSE_STOP_REPORT: dict[str, dict[str, Any]] = {}
 
 
 def run_with_faults(
