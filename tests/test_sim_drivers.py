@@ -343,3 +343,13 @@ def test_stuck_on_clamp_still_reads_clamped_with_sensor(cell: SimCell) -> None:
     cell.cnc.unclamp()
     cell.clock.advance(10)
     assert cell.cnc.clamped() and not cell.cnc.unclamped()
+
+
+def test_door_closes_uncommanded(cell: SimCell) -> None:
+    cell.cnc.open_door()
+    cell.clock.advance(3)
+    assert cell.cnc.door_open()
+    cell.cnc.inject(CncFault.DOOR_CLOSES_UNCOMMANDED)
+    assert not cell.cnc.door_open() and cell.cnc.door() == "moving"
+    cell.clock.advance(3)
+    assert cell.cnc.door_closed()

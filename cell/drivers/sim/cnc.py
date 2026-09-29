@@ -29,6 +29,8 @@ class CncFault(Enum):
     DOOR_SENSOR_SHORT = "door_sensor_short"  # both door sensors read true
     CLAMP_SENSOR_SHORT = "clamp_sensor_short"  # both clamp sensors read true
     IO_POWER_LOSS = "io_power_loss"  # I/O loses power: every wire reads de-energised
+    # Door starts closing on its own: operator hits the door button, or air pressure drops.
+    DOOR_CLOSES_UNCOMMANDED = "door_closes_uncommanded"
 
 
 class SimCnc:
@@ -202,6 +204,11 @@ class SimCnc:
             self._jaws_frozen = "closed"
         elif fault is CncFault.CLAMP_JAM:
             self._jaws_frozen = "moving"
+        elif fault is CncFault.DOOR_CLOSES_UNCOMMANDED:
+            # Physical motion only. Not recorded as a controller violation: stopping a
+            # closing door on an arm is the door's own hardware protection. What the
+            # controller must do is stop sending the arm deeper in.
+            self._move_door(False)
         else:
             self._sensor_faults.add(fault)
 

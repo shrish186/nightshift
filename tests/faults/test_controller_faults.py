@@ -85,6 +85,9 @@ CASES = {
     "clamp-stuck-on-no-sensor": Case(
         S.MACHINING, cnc(CncFault.CLAMP_STUCK_ON), "robot force_limit", no_release_sensor=True
     ),
+    "door-closes-while-arm-inside": Case(
+        S.LOAD, cnc(CncFault.DOOR_CLOSES_UNCOMMANDED), "guard arm_may_be_inside"
+    ),
     "watchman-request": Case(
         S.MACHINING, lambda _, ctrl: ctrl.request_safe("watchman: tool break"), "watchman"
     ),
@@ -114,7 +117,7 @@ def test_every_fault_type_is_covered() -> None:
     """New sim faults must get a controller test (sensor faults are the watchman's)."""
     covered = {"DOOR_STUCK", "CLAMP_FAIL", "ALARM", "CYCLE_HANG", "CLAMP_STUCK_ON",
                "DOOR_SENSOR_SHORT", "CLAMP_SENSOR_SHORT", "IO_POWER_LOSS", "FAULT", "STALL",
-               "EMPTY_GRIP", "DROP"}  # fmt: skip
+               "EMPTY_GRIP", "DROP", "DOOR_CLOSES_UNCOMMANDED"}  # fmt: skip
     all_faults = {f.name for f in (*CncFault, *RobotFault, *GripperFault)}
     # CLAMP_JAM and gripper STUCK are exercised by the random fault tests.
     assert all_faults - covered == {"CLAMP_JAM", "STUCK"}

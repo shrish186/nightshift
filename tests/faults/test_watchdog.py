@@ -1,98 +1,198 @@
-"""Prove the unsafe-event log (the watchdog) catches broken logic, and stays empty
-for correct logic under random faults."""
+"""Prove the unsafe-event log (the watchdog) catches broken controller logic, and
+stays empty for the real controller under random faults.
+
+Broken logic is made by swapping entries in the controller's STATE_TABLE (via
+monkeypatch, test-only) to remove a guard or a wait. There is no switch in the
+controller itself to turn a check off.
+"""
 
 from __future__ import annotations
+
+import dataclasses
+from collections.abc import Callable
+from dataclasses import dataclass
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+from cell.config import CellConfig
+from cell.controller.machine import (
+    STATE_TABLE,
+    CellController,
+    Command,
+    Ctx,
+    Guard,
+    Move,
+    Step,
+    WaitUntil,
+)
+from cell.controller.states import State
+from cell.drivers.robot import RobotStatus
 from cell.drivers.sim.cell import SimCell
 from cell.drivers.sim.cnc import CncFault
 from tests.faults.harness import (
-    CautiousScript,
+    ControllerRunner,
     FaultEvent,
     fault_schedules,
+    make_controller,
     new_cell,
     run_with_faults,
 )
 
-
-def _run(
-    cell: SimCell, breaks: frozenset[str] = frozenset(), faults: list[FaultEvent] | None = None
-) -> CautiousScript:
-    script = CautiousScript(cell, breaks)
-    run_with_faults(cell, script.step, faults or [])
-    return script
+S = State
+Mutation = Callable[[pytest.MonkeyPatch, CellController], None]
 
 
-# --- sanity: correct logic, no faults ---
-
-
-@pytest.mark.parametrize("no_release_sensor", [False, True])
-def test_cautious_cycle_completes_cleanly(no_release_sensor: bool) -> None:
-    cell = new_cell(no_release_sensor)
-    script = _run(cell)
-    assert script.done, script.stop_reason
-    assert cell.violations == []
-    assert cell.robot.at_pose() == "home"
-
-
-# --- deliberately broken logic: the watchdog must catch each one ---
-
-BROKEN = [
-    pytest.param(
-        "no_door_open_wait",
-        [FaultEvent(0, CncFault.DOOR_STUCK)],
-        False,
-        "door not open",
-        id="enter-with-door-half-open",
-    ),
-    pytest.param(
-        "no_plausibility",
-        [FaultEvent(0, CncFault.DOOR_SENSOR_SHORT)],
-        False,
-        "door not open",
-        id="enter-trusting-shorted-door-sensor",
-    ),
-    pytest.param("close_before_retreat", [], False, "door closed on arm", id="door-closes-on-arm"),
-    pytest.param(
-        "start_before_retreat", [], False, "cycle start with arm in machine", id="start-arm-inside"
-    ),
-    pytest.param(
-        "no_release_check",
-        [FaultEvent(0, CncFault.CLAMP_STUCK_ON)],
-        False,
-        "while still clamped",
-        id="pull-stuck-clamp-without-check",
-    ),
-    pytest.param(
-        "no_release_check",
-        [],
-        True,
-        "while still clamped",
-        id="pull-without-fallback-on-no-sensor-machine",
-    ),
-]
-
-
-@pytest.mark.parametrize(("brk", "faults", "no_release_sensor", "expect"), BROKEN)
-def test_watchdog_catches_broken_logic(
-    brk: str, faults: list[FaultEvent], no_release_sensor: bool, expect: str
+def _set(
+    mp: pytest.MonkeyPatch,
+    state: State,
+    steps: Callable[[CellConfig], tuple[Step, ...]] | None = None,
+    guards: tuple[Guard, ...] | None = None,
 ) -> None:
-    cell = new_cell(no_release_sensor)
-    _run(cell, frozenset({brk}), faults)
-    assert any(expect in v for v in cell.violations), cell.violations
+    spec = STATE_TABLE[state]
+    if steps is not None:
+        spec = dataclasses.replace(spec, steps=steps)
+    if guards is not None:
+        spec = dataclasses.replace(spec, guards=guards)
+    mp.setitem(STATE_TABLE, state, spec)
 
 
-@pytest.mark.parametrize(("brk", "faults", "no_release_sensor", "expect"), BROKEN)
-def test_same_faults_with_correct_logic_are_safe(
-    brk: str, faults: list[FaultEvent], no_release_sensor: bool, expect: str
+def _steps(*steps: Step) -> Callable[[CellConfig], tuple[Step, ...]]:
+    return lambda cfg: steps
+
+
+def _door_open_only(c: Ctx) -> str | None:  # a weaker guard: trusts door_open alone
+    return None if c.cnc.door_open() else "door not open"
+
+
+def m_no_inside_guard(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
+    _set(mp, S.LOAD, guards=())
+
+
+def m_no_door_wait(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
+    _set(mp, S.OPEN_DOOR_LOAD, steps=_steps(Command("open door", lambda c: c.cnc.open_door())))
+    _set(mp, S.LOAD, guards=())
+
+
+def m_trust_one_door_sensor(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
+    mp.setattr(ctrl._plausibility, "check", lambda: [])
+    _set(
+        mp,
+        S.OPEN_DOOR_LOAD,
+        steps=_steps(
+            Command("open door", lambda c: c.cnc.open_door()),
+            WaitUntil("door open", lambda c: c.cnc.door_open()),
+        ),
+    )
+    _set(mp, S.LOAD, guards=(_door_open_only,))
+
+
+def m_plausibility_off(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
+    mp.setattr(ctrl._plausibility, "check", lambda: [])
+
+
+def m_close_before_retreat(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
+    _set(mp, S.RETREAT, steps=_steps())
+    _set(mp, S.CLOSE_DOOR, guards=())
+
+
+def m_start_with_arm_inside(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
+    m_close_before_retreat(mp, ctrl)
+    _set(mp, S.MACHINING, guards=())
+
+
+def m_no_unclamp_wait(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
+    _set(
+        mp,
+        S.UNCLAMP,
+        steps=_steps(Command("unclamp", lambda c: c.cnc.unclamp()), Move("above_fixture")),
+    )
+
+
+def m_skip_fallback(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
+    _set(
+        mp,
+        S.UNCLAMP_FALLBACK,
+        steps=_steps(Command("unclamp", lambda c: c.cnc.unclamp()), Move("above_fixture")),
+    )
+
+
+@dataclass(frozen=True)
+class Broken:
+    mutate: Mutation
+    faults: tuple[FaultEvent, ...]
+    expect: str
+    no_release_sensor: bool = False
+    at_state: tuple[State, CncFault] | None = None  # inject when the controller enters it
+
+
+BROKEN = {
+    "keep-entering-while-door-closes": Broken(
+        m_no_inside_guard, (), "door not open", at_state=(S.LOAD, CncFault.DOOR_CLOSES_UNCOMMANDED)
+    ),
+    "enter-with-door-half-open": Broken(
+        m_no_door_wait, (FaultEvent(0, CncFault.DOOR_STUCK),), "door not open"
+    ),
+    "enter-trusting-shorted-door-sensor": Broken(
+        m_trust_one_door_sensor, (FaultEvent(0, CncFault.DOOR_SENSOR_SHORT),), "door not open"
+    ),
+    "door-closes-on-arm": Broken(m_close_before_retreat, (), "door closed on arm"),
+    "cycle-start-with-arm-inside": Broken(
+        m_start_with_arm_inside, (), "cycle start with arm in machine"
+    ),
+    "pull-stuck-clamp-without-check": Broken(
+        m_no_unclamp_wait, (FaultEvent(0, CncFault.CLAMP_STUCK_ON),), "while still clamped"
+    ),
+    "skip-fallback-on-no-sensor-machine": Broken(
+        m_skip_fallback, (), "while still clamped", no_release_sensor=True
+    ),
+}
+
+
+def _run_cycle(
+    cell: SimCell,
+    ctrl: CellController,
+    faults: tuple[FaultEvent, ...],
+    at_state: tuple[State, CncFault] | None = None,
 ) -> None:
-    # Control: the same situation with the check switched back on produces no violation.
-    cell = new_cell(no_release_sensor)
-    _run(cell, frozenset(), faults)
+    runner = ControllerRunner(ctrl)
+    pending = [at_state] if at_state else []
+
+    def step() -> bool:
+        if pending and ctrl.state is pending[0][0]:
+            cell.cnc.inject(pending.pop()[1])
+        return runner.step()
+
+    run_with_faults(cell, step, faults)
+
+
+@pytest.mark.parametrize("case", BROKEN.values(), ids=BROKEN.keys())
+def test_watchdog_catches_broken_controller(case: Broken, monkeypatch: pytest.MonkeyPatch) -> None:
+    cell = new_cell(case.no_release_sensor)
+    ctrl, _ = make_controller(cell)
+    case.mutate(monkeypatch, ctrl)
+    _run_cycle(cell, ctrl, case.faults, case.at_state)
+    assert any(case.expect in v for v in cell.violations), (cell.violations, ctrl.history)
+
+
+@pytest.mark.parametrize("case", BROKEN.values(), ids=BROKEN.keys())
+def test_same_faults_with_real_controller_are_safe(case: Broken) -> None:
+    cell = new_cell(case.no_release_sensor)
+    ctrl, _ = make_controller(cell)
+    _run_cycle(cell, ctrl, case.faults, case.at_state)
     assert cell.violations == []
+
+
+def test_door_checks_back_up_plausibility(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Defense in depth: with plausibility off, a shorted door sensor is still caught by
+    the door_open-and-not-door_closed checks, so the arm never enters."""
+    cell = new_cell()
+    ctrl, _ = make_controller(cell)
+    m_plausibility_off(monkeypatch, ctrl)
+    _run_cycle(cell, ctrl, (FaultEvent(0, CncFault.DOOR_SENSOR_SHORT),))
+    assert cell.violations == []
+    assert ctrl.state is S.SAFE and "OPEN_DOOR_LOAD timeout" in ctrl.last_safe_reason
 
 
 def test_watchdog_catches_unclamp_during_cycle() -> None:
@@ -105,7 +205,7 @@ def test_watchdog_catches_unclamp_during_cycle() -> None:
     assert any("unclamp during cycle" in v for v in cell.violations)
 
 
-# --- randomized: correct logic under random fault timing and combinations ---
+# --- randomized: the real controller under random fault timing and combinations ---
 
 
 @settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])
@@ -118,9 +218,16 @@ def test_random_faults_never_cause_unsafe_events(
     schedule: list[FaultEvent], no_release_sensor: bool, seed: int
 ) -> None:
     cell = new_cell(no_release_sensor, seed=seed)
-    script = _run(cell, faults=schedule)
+    ctrl, alerter = make_controller(cell)
+    runner = ControllerRunner(ctrl)
+    run_with_faults(cell, runner.step, schedule)
     assert cell.violations == [], (schedule, cell.violations)
-    # Every run ends either with a completed cycle or stopped (robot stopped + feed hold).
-    assert script.done or script.stopped, schedule
-    if script.stopped:
+    assert runner.done or runner.stopped, (schedule, ctrl.state)
+    if runner.stopped:
         assert cell.cnc.feed_hold_active()
+        assert cell.robot.status() in (
+            RobotStatus.STOPPED,
+            RobotStatus.FAULT,
+            RobotStatus.FORCE_LIMIT,
+        )
+        assert len(alerter.alerts) == 1

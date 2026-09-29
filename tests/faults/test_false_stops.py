@@ -13,14 +13,14 @@ from hypothesis import HealthCheck, given, settings
 
 from tests.faults.harness import (
     FALSE_STOP_REPORT,
-    CautiousScript,
     NoFaultVariation,
     cell_for,
+    controller_runners,
     no_fault_variations,
     run_cycles,
 )
 
-RUNNER_NAME = "CautiousScript"  # becomes the real controller in step 3
+RUNNER_NAME = "CellController"
 REPORT_RUNS = 200
 REPORT_CYCLES_PER_RUN = 5
 
@@ -29,7 +29,7 @@ REPORT_CYCLES_PER_RUN = 5
 @given(v=no_fault_variations())
 def test_no_faults_means_no_stops(v: NoFaultVariation) -> None:
     cell = cell_for(v)
-    result = run_cycles(cell, CautiousScript, n_cycles=3)
+    result = run_cycles(cell, controller_runners(), n_cycles=3)
     assert result.stops == [], (v, result.stops)
     assert result.completed == 3
     assert cell.violations == []
@@ -49,7 +49,7 @@ def test_false_stop_rate_report() -> None:
             robot_speed_scale=rng.uniform(0.8, 1.2),
             cycle_s=rng.uniform(5.0, 20.0),
         )
-        result = run_cycles(cell_for(v), CautiousScript, REPORT_CYCLES_PER_RUN)
+        result = run_cycles(cell_for(v), controller_runners(), REPORT_CYCLES_PER_RUN)
         cycles += result.completed + len(result.stops)
         stops += len(result.stops)
         for r in result.stops:

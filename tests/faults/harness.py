@@ -2,16 +2,13 @@
 
 - Hypothesis strategies for random fault schedules (which faults, when, in what mix).
 - run_with_faults(): steps a sim cell in sim time, injecting faults as they come due.
-- CautiousScript: a TEST-ONLY reference sequence (not the controller). It runs one
-  load -> machine -> unload cycle, checks every sensor before every move and stops
-  everything on any anomaly. Its `breaks` flags switch off individual checks so tests
-  can prove the unsafe-event log catches broken logic. In step 4 the real controller
-  replaces it under the same harness.
+- ControllerRunner: drives the real CellController one cycle at a time, for
+  run_cycles() (false stops) and run_with_faults() (random faults).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
@@ -19,8 +16,9 @@ from typing import Any, Protocol
 from hypothesis import strategies as st
 
 from cell.config import CellConfig, load_cell_config
-from cell.controller.plausibility import IoPlausibilityMonitor
-from cell.drivers.robot import RobotStatus
+from cell.controller.alerts import MemoryAlerter
+from cell.controller.machine import CellController
+from cell.controller.states import State
 from cell.drivers.sim.cell import SimCell, build_sim_cell
 from cell.drivers.sim.cnc import CncFault
 from cell.drivers.sim.gripper import GripperFault
@@ -93,13 +91,61 @@ def new_cell(no_release_sensor: bool = False, seed: int = 0) -> SimCell:
 
 
 class Runner(Protocol):
-    """What the harness drives: CautiousScript now, the real controller from step 3."""
+    """What the harness drives for one cycle."""
 
-    done: bool
-    stopped: bool
-    stop_reason: str
+    @property
+    def done(self) -> bool: ...
+    @property
+    def stopped(self) -> bool: ...
+    @property
+    def stop_reason(self) -> str: ...
 
     def step(self) -> bool: ...
+
+
+def make_controller(cell: SimCell) -> tuple[CellController, MemoryAlerter]:
+    alerter = MemoryAlerter()
+    ctrl = CellController(
+        cell.cfg, cell.clock, cell.robot, cell.gripper, cell.cnc, cell.safety, alerter
+    )
+    return ctrl, alerter
+
+
+class ControllerRunner:
+    """One cycle of a CellController. done = back in IDLE with one more cycle; stopped = SAFE."""
+
+    def __init__(self, ctrl: CellController) -> None:
+        self.ctrl = ctrl
+        self._start = ctrl.cycles_completed
+        ctrl.start_cycle()
+
+    @property
+    def done(self) -> bool:
+        return self.ctrl.state is State.IDLE and self.ctrl.cycles_completed > self._start
+
+    @property
+    def stopped(self) -> bool:
+        return self.ctrl.state is State.SAFE
+
+    @property
+    def stop_reason(self) -> str:
+        return self.ctrl.last_safe_reason
+
+    def step(self) -> bool:
+        self.ctrl.step()
+        return not (self.done or self.stopped)
+
+
+def controller_runners() -> Callable[[SimCell], Runner]:
+    """Runner factory for run_cycles(): one controller per cell, kept across cycles."""
+    ctrls: dict[int, CellController] = {}
+
+    def new(cell: SimCell) -> Runner:
+        if id(cell) not in ctrls:
+            ctrls[id(cell)] = make_controller(cell)[0]
+        return ControllerRunner(ctrls[id(cell)])
+
+    return new
 
 
 @dataclass(frozen=True)
@@ -181,164 +227,3 @@ def run_with_faults(
         if not step():
             return
         cell.clock.advance(DT)
-
-
-class _Abort(Exception):
-    pass
-
-
-# Checks a test can switch off to simulate a bug in controller logic.
-BREAKS = frozenset(
-    {
-        "no_plausibility",  # ignore sensor-pair plausibility
-        "no_door_open_wait",  # enter the machine without confirming the door is open
-        "close_before_retreat",  # close the door before the arm is clear
-        "no_release_check",  # pull the part without confirming unclamp / using fallback
-        "start_before_retreat",  # cycle start while the arm is still inside
-    }
-)
-
-
-class CautiousScript:
-    def __init__(self, cell: SimCell, breaks: frozenset[str] = frozenset()) -> None:
-        unknown = breaks - BREAKS
-        if unknown:
-            raise ValueError(f"unknown breaks: {sorted(unknown)}")
-        self.cell = cell
-        self.breaks = breaks
-        self.mon = IoPlausibilityMonitor(cell.cnc, cell.clock, cell.cfg)
-        self.stopped = False
-        self.stop_reason = ""
-        self.done = False
-        self._gen = self._sequence()
-
-    # --- driving ---
-    def step(self) -> bool:
-        """Advance one tick. Returns False once finished or stopped."""
-        if self.stopped or self.done:
-            return False
-        reason = self._anomaly()
-        if reason:
-            self._stop(reason)
-            return False
-        try:
-            next(self._gen)
-        except StopIteration:
-            self.done = True
-        except _Abort:
-            pass
-        return not (self.stopped or self.done)
-
-    def _anomaly(self) -> str:
-        c = self.cell
-        if not c.safety.estop_ok() or not c.safety.guard_closed():
-            return "safety input"
-        if c.cnc.alarm():
-            return "cnc alarm"
-        if c.robot.status() in (RobotStatus.FAULT, RobotStatus.STOPPED, RobotStatus.FORCE_LIMIT):
-            return f"robot {c.robot.status().value}"
-        if "no_plausibility" not in self.breaks:
-            faults = self.mon.check()
-            if faults:
-                return f"plausibility {[f.value for f in faults]}"
-        return ""
-
-    def _stop(self, reason: str) -> None:
-        self.cell.robot.stop()
-        self.cell.cnc.feed_hold()
-        self.stopped = True
-        self.stop_reason = reason
-
-    # --- helpers ---
-    def _wait(self, cond: Callable[[], bool], timeout_s: float, what: str) -> Generator[None]:
-        start = self.cell.clock.now()
-        while not cond():
-            if self.cell.clock.now() - start > timeout_s:
-                self._stop(f"timeout: {what}")
-                raise _Abort
-            yield
-
-    def _move(self, pose: str) -> Generator[None]:
-        self.cell.robot.move_to(pose)
-        yield from self._wait(
-            lambda: self.cell.robot.at_pose() == pose, self.cell.cfg.timeouts_s.load, pose
-        )
-
-    def _require(self, ok: bool, what: str) -> None:
-        if not ok:
-            self._stop(what)
-            raise _Abort
-
-    # --- the cycle ---
-    def _sequence(self) -> Generator[None]:
-        c, t = self.cell, self.cell.cfg.timeouts_s
-        # pick raw part
-        c.gripper.open()
-        yield from self._wait(c.gripper.is_open, 2, "gripper open")
-        yield from self._move("above_raw_tray")
-        yield from self._move("pick_raw")
-        c.gripper.close()
-        yield from self._wait(c.gripper.is_closed, 2, "gripper close")
-        self._require(c.gripper.has_part(), "no part picked")
-        yield from self._move("above_raw_tray")
-
-        # enter and load
-        yield from self._open_door()
-        yield from self._move("above_fixture")
-        yield from self._move("load")
-        c.cnc.clamp()
-        yield from self._wait(c.cnc.clamped, t.clamp, "clamp")
-        c.gripper.open()
-        yield from self._wait(c.gripper.is_open, 2, "gripper release")
-
-        # retreat, close, machine
-        if "start_before_retreat" in self.breaks:
-            yield from self._move("above_fixture")
-            c.cnc.cycle_start()
-        if "close_before_retreat" not in self.breaks:
-            yield from self._move("above_fixture")
-            yield from self._move("clear_of_machine")
-        c.cnc.close_door()
-        yield from self._wait(c.cnc.door_closed, t.door, "door close")
-        c.cnc.cycle_start()
-        yield from self._wait(c.cnc.cycle_done, t.machining, "cycle")
-
-        # enter and unload
-        yield from self._open_door()
-        yield from self._move("above_fixture")
-        yield from self._move("load")
-        c.gripper.close()
-        yield from self._wait(c.gripper.is_closed, 2, "gripper close")
-        self._require(c.gripper.has_part(), "finished part not gripped")
-        c.cnc.unclamp()
-        fb = c.cfg.unclamp_fallback
-        if "no_release_check" in self.breaks:
-            yield from self._move("above_fixture")
-        elif fb is None:
-            yield from self._wait(c.cnc.unclamped, t.unclamp, "unclamp")
-            yield from self._move("above_fixture")
-        else:
-            start = c.clock.now()
-            while c.clock.now() - start < fb.release_wait_s:
-                yield
-            c.robot.move_to_limited(fb.pull_pose, fb.pull_force_limit_n)
-            yield from self._wait(
-                lambda: c.robot.at_pose() == fb.pull_pose, t.unload, "fallback pull"
-            )
-
-        # leave and place
-        yield from self._move("clear_of_machine")
-        yield from self._move("above_done_tray")
-        yield from self._move("place_done")
-        c.gripper.open()
-        yield from self._wait(c.gripper.is_open, 2, "gripper release")
-        yield from self._move("above_done_tray")
-        yield from self._move("home")
-
-    def _open_door(self) -> Generator[None]:
-        c = self.cell
-        self._require(not c.cnc.cycle_running(), "spindle running")
-        c.cnc.open_door()
-        if "no_door_open_wait" in self.breaks:
-            return
-        yield from self._wait(c.cnc.door_open, c.cfg.timeouts_s.door, "door open")
