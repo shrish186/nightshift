@@ -70,6 +70,26 @@ def m_no_inside_guard(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
     _set(mp, S.LOAD, guards=())
 
 
+def m_no_seat_checks(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
+    clamp_steps = STATE_TABLE[S.CLAMP].steps(ctrl._cfg)
+    _set(
+        mp,
+        S.CLAMP,
+        steps=_steps(
+            *(
+                s
+                for s in clamp_steps
+                if not isinstance(s, WaitUntil) or s.label != "part seated in fixture"
+            )
+        ),
+    )
+    _set(mp, S.MACHINING, guards=(_door_closed_and_clamped,))
+
+
+def _door_closed_and_clamped(c: Ctx) -> str | None:  # machine_ready_to_cut minus the seat check
+    return None if c.cnc.door_closed() and c.cnc.clamped() else "not ready"
+
+
 def m_no_door_wait(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
     _set(mp, S.OPEN_DOOR_LOAD, steps=_steps(Command("open door", lambda c: c.cnc.open_door())))
     _set(mp, S.LOAD, guards=())
@@ -143,6 +163,12 @@ BROKEN = {
     ),
     "pull-stuck-clamp-without-check": Broken(
         m_no_unclamp_wait, (FaultEvent(0, CncFault.CLAMP_STUCK_ON),), "while still clamped"
+    ),
+    "cut-a-crooked-part": Broken(
+        m_no_seat_checks,
+        (),
+        "cycle start with part not seated",
+        at_state=(S.PICK_RAW, CncFault.PART_MISSEATED),
     ),
     "skip-fallback-on-no-sensor-machine": Broken(
         m_skip_fallback, (), "while still clamped", no_release_sensor=True

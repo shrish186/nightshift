@@ -55,6 +55,7 @@ pins:
   clamp_out: "Y0.2"
   clamped_in: "X0.1"
   unclamped_in: "X0.5"
+  part_present_in: "X0.6"  # fixture seat sensor. ASSUMPTION / VERIFY ON HARDWARE
   cycle_start_out: "Y0.3"
   cycle_done_in: "X0.2"
   feed_hold_out: "Y0.4"

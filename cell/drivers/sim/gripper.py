@@ -26,11 +26,16 @@ class SimGripper:
         self._has_part = False
         self._stuck = False
         self._empty_grip = False
+        # Wired by SimCell: told when a held part is released, and when a grip succeeds.
+        self.on_release: Callable[[], None] = lambda: None
+        self.on_grip: Callable[[], None] = lambda: None
 
     def _settled(self) -> bool:
         return not self._stuck and self._clock.now() >= self._done_at
 
     def open(self) -> None:
+        if self.has_part():
+            self.on_release()
         self._closed_cmd = False
         self._has_part = False
         self._done_at = self._clock.now() + ACTUATE_S
@@ -39,6 +44,8 @@ class SimGripper:
         self._closed_cmd = True
         self._has_part = self._part_at_tool() and not self._empty_grip
         self._done_at = self._clock.now() + ACTUATE_S
+        if self._has_part:
+            self.on_grip()
 
     def is_open(self) -> bool:
         return not self._closed_cmd and self._settled()

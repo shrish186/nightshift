@@ -106,6 +106,7 @@ class Pins(_Strict):
     clamp_out: str
     clamped_in: str
     unclamped_in: str | None  # required key; null only when clamp_released_sensor is false
+    part_present_in: str
     cycle_start_out: str
     cycle_done_in: str
     feed_hold_out: str

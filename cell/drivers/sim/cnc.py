@@ -31,6 +31,8 @@ class CncFault(Enum):
     IO_POWER_LOSS = "io_power_loss"  # I/O loses power: every wire reads de-energised
     # Door starts closing on its own: operator hits the door button, or air pressure drops.
     DOOR_CLOSES_UNCOMMANDED = "door_closes_uncommanded"
+    # Part sits crooked in the fixture: the one there now, or the next one placed.
+    PART_MISSEATED = "part_misseated"
 
 
 class SimCnc:
@@ -62,6 +64,11 @@ class SimCnc:
         self._hold = False
         self._alarm = False
         self._sensor_faults: set[CncFault] = set()
+        # Physical part in the fixture: "empty", "seated" or "crooked".
+        self._fixture = "empty"
+        self._misseat_next = False
+        # Wired by SimCell: True while the arm holds a part at the load pose.
+        self.arm_holding_at_load: Callable[[], bool] = lambda: False
         # Wired by SimCell: True if the arm is in the machine envelope.
         self.arm_in_machine: Callable[[], bool] = lambda: False
         self.violations: list[str] = []
@@ -93,6 +100,29 @@ class SimCnc:
             return self._jaws_frozen
         target = "closed" if self._clamp_cmd and not self._clamp_fail else "open"
         return target if self._clock.now() >= self._clamp_done_at else "moving"
+
+    def seat(self) -> str:
+        """Physical part state in the fixture: "empty", "seated" or "crooked".
+
+        A part still held by the arm at the load pose is already sitting in the fixture.
+        """
+        if self._fixture != "empty":
+            return self._fixture
+        if self.arm_holding_at_load():
+            return "crooked" if self._misseat_next else "seated"
+        return "empty"
+
+    def place_part(self) -> None:
+        """Arm released a part at the load pose."""
+        self._fixture = "crooked" if self._misseat_next else "seated"
+        self._misseat_next = False
+
+    def take_part(self) -> None:
+        """Arm gripped the part in the fixture."""
+        self._fixture = "empty"
+
+    def fixture_has_part(self) -> bool:
+        return self._fixture != "empty"
 
     def spindle_running(self) -> bool:
         self._update()
@@ -135,6 +165,8 @@ class SimCnc:
         self._update()
         if self.arm_in_machine():
             self._violation("cycle start with arm in machine")
+        if self.seat() == "crooked":
+            self._violation("cycle start with part not seated")
         # The machine's own interlocks use its own (physical) door and clamp state.
         ready = self.door() == "closed" and self.jaws() == "closed"
         if not ready or self._alarm or self._hold:
@@ -173,6 +205,9 @@ class SimCnc:
             return False
         return CncFault.CLAMP_SENSOR_SHORT in self._sensor_faults or self.jaws() == "open"
 
+    def part_present(self) -> bool:
+        return self._powered and self.seat() == "seated"
+
     # "Bad when true" inputs are wired inverted (see cnc_io.py), so a dead wire reads True.
     def cycle_running(self) -> bool:
         return not self._powered or self.spindle_running()
@@ -204,6 +239,11 @@ class SimCnc:
             self._jaws_frozen = "closed"
         elif fault is CncFault.CLAMP_JAM:
             self._jaws_frozen = "moving"
+        elif fault is CncFault.PART_MISSEATED:
+            if self._fixture == "seated":
+                self._fixture = "crooked"
+            else:
+                self._misseat_next = True
         elif fault is CncFault.DOOR_CLOSES_UNCOMMANDED:
             # Physical motion only. Not recorded as a controller violation: stopping a
             # closing door on an arm is the door's own hardware protection. What the

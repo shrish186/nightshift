@@ -57,6 +57,16 @@ class CncIo(Protocol):
         reads as released), and the controller uses the unclamp_fallback pull test.
         """
 
+    def part_present(self) -> bool:
+        """Part confirmed present *and seated* in the fixture.
+
+        ASSUMPTION / VERIFY ON HARDWARE: a proximity or air-gauge seat sensor in the
+        fixture, wired fail-safe so a dead wire reads False (no part). A crooked part
+        must read False. HW to confirm the sensor can tell seated from crooked for each
+        part family, and that coolant/chips/vibration don't make it flicker mid-cycle
+        (the controller checks it throughout MACHINING).
+        """
+
     def cycle_running(self) -> bool: ...
 
     def cycle_done(self) -> bool:

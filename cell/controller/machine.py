@@ -132,6 +132,8 @@ def machine_ready_to_cut(c: Ctx) -> str | None:
         return "door not confirmed closed"
     if not c.cnc.clamped():
         return "part not confirmed clamped"
+    if not c.cnc.part_present():
+        return "part not seated"
     return arm_outside_machine(c)
 
 
@@ -215,6 +217,7 @@ STATE_TABLE: dict[State, StateSpec] = {
     State.LOAD: _spec(
         _fixed(
             Require("raw part in gripper", _has_part),
+            Require("fixture empty", lambda c: not c.cnc.part_present()),
             Move("above_fixture"),
             Move("load"),
             Require("raw part in gripper", _has_part),
@@ -225,6 +228,7 @@ STATE_TABLE: dict[State, StateSpec] = {
     ),
     State.CLAMP: _spec(
         _fixed(
+            WaitUntil("part seated in fixture", lambda c: c.cnc.part_present()),
             Command("clamp", lambda c: c.cnc.clamp()),
             WaitUntil("clamped", _clamp_confirmed),
             Command("gripper open", lambda c: c.gripper.open()),

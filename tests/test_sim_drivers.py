@@ -277,6 +277,7 @@ def _grip_finished_part(cell: SimCell) -> None:
     cell.clock.advance(10)
     cell.robot.move_to("load")
     cell.clock.advance(10)
+    cell.cnc.place_part()  # a finished part is sitting in the fixture
     cell.gripper.close()
     cell.clock.advance(1)
     assert cell.gripper.has_part() and cell.cnc.clamped()
@@ -353,3 +354,76 @@ def test_door_closes_uncommanded(cell: SimCell) -> None:
     assert not cell.cnc.door_open() and cell.cnc.door() == "moving"
     cell.clock.advance(3)
     assert cell.cnc.door_closed()
+
+
+# --- part in fixture ---
+
+
+def _arm_at_load_holding_raw(cell: SimCell) -> None:
+    cell.robot.move_to("pick_raw")
+    cell.clock.advance(10)
+    cell.gripper.close()
+    cell.clock.advance(1)
+    cell.cnc.open_door()
+    cell.clock.advance(3)
+    cell.robot.move_to("above_fixture")
+    cell.clock.advance(10)
+    cell.robot.move_to("load")
+    cell.clock.advance(10)
+
+
+def test_part_present_follows_the_part(cell: SimCell) -> None:
+    assert not cell.cnc.part_present()
+    _arm_at_load_holding_raw(cell)
+    assert cell.cnc.part_present()  # held part sitting in the fixture
+    cell.gripper.open()
+    cell.clock.advance(1)
+    assert cell.cnc.part_present() and cell.cnc.seat() == "seated"
+    cell.robot.move_to("above_fixture")
+    cell.clock.advance(10)
+    assert cell.cnc.part_present()  # arm gone, part stays
+    cell.robot.move_to("load")
+    cell.clock.advance(10)
+    cell.gripper.close()
+    cell.clock.advance(1)
+    cell.robot.move_to("above_fixture")
+    cell.clock.advance(10)
+    assert cell.gripper.has_part() and not cell.cnc.part_present()
+
+
+def test_gripper_finds_nothing_in_empty_fixture(cell: SimCell) -> None:
+    cell.cnc.open_door()
+    cell.clock.advance(3)
+    cell.robot.move_to("above_fixture")
+    cell.clock.advance(10)
+    cell.robot.move_to("load")
+    cell.clock.advance(10)
+    cell.gripper.close()
+    cell.clock.advance(1)
+    assert not cell.gripper.has_part()
+
+
+def test_misseated_part_reads_not_present(cell: SimCell) -> None:
+    cell.cnc.inject(CncFault.PART_MISSEATED)
+    _arm_at_load_holding_raw(cell)
+    assert cell.cnc.seat() == "crooked" and not cell.cnc.part_present()
+
+
+def test_sim_flags_cycle_start_on_crooked_part(cell: SimCell) -> None:
+    _arm_at_load_holding_raw(cell)
+    cell.cnc.clamp()
+    cell.gripper.open()
+    cell.clock.advance(1)
+    cell.robot.move_to("clear_of_machine")
+    cell.clock.advance(10)
+    cell.cnc.close_door()
+    cell.clock.advance(3)
+    cell.cnc.inject(CncFault.PART_MISSEATED)
+    cell.cnc.cycle_start()
+    assert any("part not seated" in v for v in cell.violations)
+
+
+def test_part_present_reads_false_on_power_loss(cell: SimCell) -> None:
+    _arm_at_load_holding_raw(cell)
+    cell.cnc.inject(CncFault.IO_POWER_LOSS)
+    assert not cell.cnc.part_present()
