@@ -102,6 +102,9 @@ CASES = {
         lambda c, _: c.gripper.close(),
         "ENTER_UNLOAD requirement failed: gripper open",
     ),
+    "feed-hold-pressed-mid-cut": Case(
+        S.MACHINING, lambda c, _: c.cnc.feed_hold(), "feed hold during machining"
+    ),
     "watchman-request": Case(
         S.MACHINING, lambda _, ctrl: ctrl.request_safe("watchman: tool break"), "watchman"
     ),

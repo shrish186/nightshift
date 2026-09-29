@@ -137,6 +137,15 @@ def machine_ready_to_cut(c: Ctx) -> str | None:
     return arm_outside_machine(c)
 
 
+def no_feed_hold(c: Ctx) -> str | None:
+    """A feed hold the cell did not command (operator at the machine, or the machine
+    itself) freezes the cut. Stop and tell someone instead of waiting for the timeout.
+    Watchman feed holds arrive with request_safe() first, so they are named as such."""
+    if c.cnc.feed_hold_active():
+        return "feed hold during machining (not commanded by the cell)"
+    return None
+
+
 # --- the table ---
 
 
@@ -258,7 +267,7 @@ STATE_TABLE: dict[State, StateSpec] = {
             Command("cycle start", lambda c: c.cnc.cycle_start()),
             WaitUntil("cycle done", lambda c: c.cnc.cycle_done()),
         ),
-        (machine_ready_to_cut,),
+        (no_feed_hold, machine_ready_to_cut),
         lambda cfg: cfg.timeouts_s.machining,
         _goto(State.OPEN_DOOR_UNLOAD),
     ),
