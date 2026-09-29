@@ -1,0 +1,154 @@
+"""Controller state machine: normal cycle, logging, table structure."""
+
+from __future__ import annotations
+
+import json
+import logging
+
+import pytest
+
+from cell.controller.alerts import MemoryAlerter
+from cell.controller.machine import STATE_TABLE, CellController
+from cell.controller.states import State
+from cell.drivers.sim.cell import SimCell
+from cell.log import JsonFormatter
+from tests.faults.harness import new_cell
+
+S = State
+
+NORMAL_CYCLE_WITH_SENSOR = [
+    S.IDLE,
+    S.PICK_RAW,
+    S.OPEN_DOOR_LOAD,
+    S.LOAD,
+    S.CLAMP,
+    S.RETREAT,
+    S.CLOSE_DOOR,
+    S.MACHINING,
+    S.OPEN_DOOR_UNLOAD,
+    S.ENTER_UNLOAD,
+    S.UNCLAMP,
+    S.EXIT,
+    S.PLACE_DONE,
+    S.IDLE,
+]
+NORMAL_CYCLE_NO_SENSOR = [
+    S.UNCLAMP_FALLBACK if s is S.UNCLAMP else s for s in NORMAL_CYCLE_WITH_SENSOR
+]
+
+
+def make(cell: SimCell) -> tuple[CellController, MemoryAlerter]:
+    alerter = MemoryAlerter()
+    ctrl = CellController(
+        cell.cfg, cell.clock, cell.robot, cell.gripper, cell.cnc, cell.safety, alerter
+    )
+    return ctrl, alerter
+
+
+def run_one_cycle(cell: SimCell, ctrl: CellController, max_s: float = 200.0) -> None:
+    assert ctrl.start_cycle()
+    start = ctrl.cycles_completed
+    t0 = cell.clock.now()
+    while cell.clock.now() - t0 < max_s:
+        ctrl.step()
+        if ctrl.state in (S.IDLE, S.SAFE) and (
+            ctrl.cycles_completed > start or ctrl.state is S.SAFE
+        ):
+            return
+        cell.clock.advance(0.1)
+
+
+def visited(ctrl: CellController) -> list[State]:
+    return [ctrl.history[0].src, *(t.dst for t in ctrl.history)]
+
+
+@pytest.mark.parametrize(
+    ("no_release_sensor", "expected"),
+    [(False, NORMAL_CYCLE_WITH_SENSOR), (True, NORMAL_CYCLE_NO_SENSOR)],
+)
+def test_normal_cycle_visits_expected_states(
+    no_release_sensor: bool, expected: list[State]
+) -> None:
+    cell = new_cell(no_release_sensor)
+    ctrl, alerter = make(cell)
+    run_one_cycle(cell, ctrl)
+    assert ctrl.state is S.IDLE, ctrl.last_safe_reason
+    assert visited(ctrl) == expected
+    assert ctrl.cycles_completed == 1
+    assert alerter.alerts == []
+    assert cell.violations == []
+    assert cell.robot.at_pose() == "home"
+
+
+def test_back_to_back_cycles() -> None:
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    for _ in range(3):
+        run_one_cycle(cell, ctrl)
+    assert ctrl.cycles_completed == 3 and ctrl.state is S.IDLE
+    assert cell.violations == []
+
+
+def test_every_transition_logged_as_json(caplog: pytest.LogCaptureFixture) -> None:
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    with caplog.at_level(logging.INFO, logger="cell.controller"):
+        run_one_cycle(cell, ctrl)
+    lines = [json.loads(JsonFormatter().format(r)) for r in caplog.records]
+    transitions = [ln for ln in lines if ln.get("event") == "transition"]
+    assert len(transitions) == len(ctrl.history) == len(NORMAL_CYCLE_WITH_SENSOR) - 1
+    for ln in transitions:
+        assert ln["cell_id"] == "sim-01"
+        assert ln["reason"]
+        assert isinstance(ln["ts"], float)
+
+
+def test_start_cycle_only_from_idle() -> None:
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    assert ctrl.start_cycle()
+    ctrl.step()
+    assert ctrl.state is S.PICK_RAW
+    assert not ctrl.start_cycle()
+
+
+def test_idle_does_nothing_without_start() -> None:
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    for _ in range(100):
+        ctrl.step()
+        cell.clock.advance(0.1)
+    assert ctrl.state is S.IDLE and ctrl.history == []
+    assert cell.robot.at_pose() == "home"
+
+
+# --- table structure ---
+
+
+def test_every_working_state_has_a_spec() -> None:
+    assert set(STATE_TABLE) == set(State) - {S.IDLE, S.SAFE}
+
+
+def test_every_spec_has_timeout_and_next_state() -> None:
+    cfg = new_cell().cfg
+    for state, spec in STATE_TABLE.items():
+        assert spec.timeout(cfg) > 0, state
+        assert spec.next_states, state
+        assert S.SAFE not in spec.next_states  # SAFE is reachable from anywhere, never "next"
+
+
+def test_enter_unload_can_only_go_to_a_release_check() -> None:
+    assert STATE_TABLE[S.ENTER_UNLOAD].next_states == {S.UNCLAMP, S.UNCLAMP_FALLBACK}
+
+
+@pytest.mark.parametrize(
+    ("no_release_sensor", "expected"), [(False, S.UNCLAMP), (True, S.UNCLAMP_FALLBACK)]
+)
+def test_release_check_branch_follows_config(no_release_sensor: bool, expected: State) -> None:
+    cfg = new_cell(no_release_sensor).cfg
+    assert STATE_TABLE[S.ENTER_UNLOAD].next(cfg) is expected
+
+
+def test_only_unclamp_states_lead_to_exit() -> None:
+    into_exit = {s for s, spec in STATE_TABLE.items() if S.EXIT in spec.next_states}
+    assert into_exit == {S.UNCLAMP, S.UNCLAMP_FALLBACK}
