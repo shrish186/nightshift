@@ -158,3 +158,35 @@ def test_watchman_error_is_a_stop(monkeypatch: pytest.MonkeyPatch) -> None:
     system.ctrl.step()
     assert_watchman_safe(cell, system, "stale")
     assert "watchman error: OSError" in system.ctrl.last_safe_reason
+
+
+# --- reset refused while the watchman is unhealthy ---
+
+
+def _tool_break_safe() -> tuple[SimCell, System]:
+    cell = new_cell()
+    system = make_system(cell)
+    run_cycle(cell, system, S.MACHINING, SensorFault.TOOL_BREAK, 4.0)
+    assert_watchman_safe(cell, system, "tool_break")
+    for _ in range(50):  # let the controller finish reacting; arm is outside, door closed
+        system.watchman.tick()
+        system.ctrl.step()
+        cell.clock.advance(0.1)
+    cell.cnc.operator_clear()
+    return cell, system
+
+
+def test_reset_refused_while_watchman_stop_is_latched() -> None:
+    _, system = _tool_break_safe()
+    why = system.ctrl.reset("asha")
+    assert why is not None and "watchman stop latched" in why
+    system.watchman.reset()  # operator changed the tool and reset the watchman
+    assert system.ctrl.reset("asha") is None
+
+
+def test_reset_refused_while_sensor_data_is_stale() -> None:
+    cell, system = _tool_break_safe()
+    cell.sensors.inject(SensorFault.DEAD)
+    system.watchman.reset()
+    why = system.ctrl.reset("asha")
+    assert why is not None and "no fresh sensor data" in why

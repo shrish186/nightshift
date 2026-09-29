@@ -71,6 +71,19 @@ class Watchman:
                 self._alert(f, now)
         return findings
 
+    def health(self) -> str | None:
+        """For the controller's reset(): None if the watchman can watch, else why not."""
+        if self.stopped:
+            return f"watchman stop latched ({self.stop_reason}): reset the watchman first"
+        try:
+            frame = self._sensors.read()
+        except Exception as e:
+            return f"watchman: sensor read failed: {type(e).__name__}: {e}"
+        now = self._clock.now()
+        if frame is None or now - frame.ts >= self._cfg.watchman.stale_after_s:
+            return "watchman: no fresh sensor data"
+        return None
+
     def reset(self) -> None:
         """Human-initiated, together with the controller reset. Keeps the learned reference."""
         self.stopped = False

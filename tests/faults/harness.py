@@ -135,6 +135,7 @@ class System:
 def make_system(cell: SimCell) -> System:
     ctrl, alerter = make_controller(cell)
     watchman = Watchman(cell.cfg, cell.clock, cell.sensors, cell.cnc, ctrl.request_safe, alerter)
+    ctrl.reset_checks.append(watchman.health)
     return System(ctrl, watchman, alerter)
 
 

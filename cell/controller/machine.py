@@ -382,6 +382,9 @@ class CellController:
         self.cycles_completed = 0
         self.last_safe_reason = ""
         self.history: list[Transition] = []
+        # Extra checks reset() must pass, e.g. the watchman's health. Each returns None
+        # when OK, or why a reset must be refused.
+        self.reset_checks: list[Callable[[], str | None]] = []
         self._start_requested = False
         self.program: str | None = None  # active CNC program, set by start_cycle()
         self._safe_requested: str | None = None
@@ -447,6 +450,10 @@ class CellController:
             blockers.append("feed hold not cleared at the machine")
         if not (c.cnc.door_closed() and not c.cnc.door_open()):
             blockers.append("door not confirmed closed")
+        for check in self.reset_checks:
+            why = check()
+            if why is not None:
+                blockers.append(why)
         # The person has checked the cell: accept current readings as the new baseline.
         self._plausibility.rebaseline()
         faults = self._plausibility.check()
