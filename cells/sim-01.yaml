@@ -5,6 +5,7 @@ cell_id: sim-01
 machine:
   kind: vmc
   controller: sim
+  clamp_released_sensor: true
 
 robot:
   kind: cobot6
@@ -45,6 +46,7 @@ pins:
   door_closed_in: "X0.0"
   clamp_out: "Y0.2"
   clamped_in: "X0.1"
+  unclamped_in: "X0.5"
   cycle_start_out: "Y0.3"
   cycle_done_in: "X0.2"
   feed_hold_out: "Y0.4"

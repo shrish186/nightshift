@@ -18,11 +18,19 @@ class CncFault(Enum):
     CLAMP_FAIL = "clamp_fail"  # clamp never confirms
     ALARM = "alarm"  # machine raises an alarm
     CYCLE_HANG = "cycle_hang"  # cycle never reports done
+    CLAMP_STUCK_ON = "clamp_stuck_on"  # jaws stay closed even when unclamp is commanded
 
 
 class SimCnc:
-    def __init__(self, clock: Clock, cycle_s: float = DEFAULT_CYCLE_S) -> None:
+    def __init__(
+        self,
+        clock: Clock,
+        cycle_s: float = DEFAULT_CYCLE_S,
+        clamp_released_sensor: bool = True,
+    ) -> None:
         self._clock = clock
+        self._has_released_sensor = clamp_released_sensor
+        self._jaws_frozen: str | None = None
         self._cycle_s = cycle_s
         self._door_target_open = False
         self._door_done_at = 0.0
@@ -104,10 +112,11 @@ class SimCnc:
         )
 
     def clamped(self) -> bool:
-        return self._clamp_cmd and not self._clamp_fail and self._clock.now() >= self._clamp_done_at
+        return self.jaws() == "closed"
 
     def unclamped(self) -> bool:
-        return not self._clamp_cmd and self._clock.now() >= self._clamp_done_at
+        # No sensor fitted: never reads as released (fail-safe; see CncIo.unclamped).
+        return self._has_released_sensor and self.jaws() == "open"
 
     def cycle_running(self) -> bool:
         self._update()
@@ -133,6 +142,15 @@ class SimCnc:
             self._alarm = True
         elif fault is CncFault.CYCLE_HANG:
             self._cycle_hang = True
+        elif fault is CncFault.CLAMP_STUCK_ON:
+            self._jaws_frozen = "closed"
+
+    def jaws(self) -> str:
+        """Physical jaw position: "open", "closed" or "moving"."""
+        if self._jaws_frozen is not None:
+            return self._jaws_frozen
+        target = "closed" if self._clamp_cmd and not self._clamp_fail else "open"
+        return target if self._clock.now() >= self._clamp_done_at else "moving"
 
     def spindle_cutting(self) -> bool:
         return self.cycle_running() and not self._hold

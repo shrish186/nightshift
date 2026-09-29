@@ -14,6 +14,8 @@ from cell.drivers.sim.sensors import SimSensors
 
 # Poses where the gripper can actually grab a part (raw tray pick, finished part in fixture).
 GRIP_POSES = frozenset({"pick_raw", "load"})
+# ASSUMPTION: force needed to pull a part out of closed jaws. Far above any sane pull limit.
+CLAMP_HOLD_N = 500.0
 
 
 @dataclass
@@ -37,7 +39,7 @@ def build_sim_cell(cfg: CellConfig, seed: int = 0, cycle_s: float = DEFAULT_CYCL
     clock = SimClock()
     robot = SimRobot(clock, cfg.poses)
     gripper = SimGripper(clock, part_at_tool=lambda: robot.at_pose() in GRIP_POSES)
-    cnc = SimCnc(clock, cycle_s=cycle_s)
+    cnc = SimCnc(clock, cycle_s=cycle_s, clamp_released_sensor=cfg.machine.clamp_released_sensor)
     safety = SimSafety()
     sensors = SimSensors(clock, cutting=cnc.spindle_cutting, seed=seed)
     cell = SimCell(cfg, clock, robot, gripper, cnc, safety, sensors)
@@ -45,13 +47,25 @@ def build_sim_cell(cfg: CellConfig, seed: int = 0, cycle_s: float = DEFAULT_CYCL
     zone = cfg.machine_zone_poses
     cnc.arm_in_machine = lambda: robot.occupies(zone)
 
-    def check_entry(target: str) -> None:
+    def holding_clamped_part() -> bool:
+        return gripper.has_part() and cnc.jaws() != "open"
+
+    def check_move(origin: str, target: str, force_limit_n: float | None) -> None:
+        now = f"t={clock.now():.2f}"
         if target in zone and not (cnc.door_open() and not cnc.cycle_running()):
             cell.robot_violations.append(
-                f"t={clock.now():.2f} arm moving to {target} with door not open or spindle running"
+                f"{now} arm moving to {target} with door not open or spindle running"
             )
+        # An unlimited move away from the fixture while the part is still clamped is a
+        # crash. A force-limited move is the approved fallback; its limit catches it.
+        if origin == "load" and force_limit_n is None and holding_clamped_part():
+            cell.robot_violations.append(f"{now} pulled part from {origin} while still clamped")
 
-    robot.on_move_start = check_entry
+    def resistance(origin: str | None) -> float:
+        return CLAMP_HOLD_N if origin == "load" and holding_clamped_part() else 0.0
+
+    robot.on_move_start = check_move
+    robot.resistance_n = resistance
 
     # Hardware e-stop/guard chain stops robot and machine independently of software.
     safety.on_trip.append(robot.stop)

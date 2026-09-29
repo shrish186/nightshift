@@ -93,3 +93,70 @@ def test_robot_kind_required(sim_cell_raw: dict[str, Any]) -> None:
     del raw["robot"]
     with pytest.raises(ValidationError):
         CellConfig.model_validate(raw)
+
+
+def _no_release_sensor(raw: dict[str, Any]) -> dict[str, Any]:
+    raw = copy.deepcopy(raw)
+    raw["machine"]["clamp_released_sensor"] = False
+    raw["pins"]["unclamped_in"] = None
+    raw["unclamp_fallback"] = {
+        "release_wait_s": 2.0,
+        "pull_pose": "above_fixture",
+        "pull_force_limit_n": 40.0,
+    }
+    return raw
+
+
+def test_clamp_released_sensor_must_be_declared(sim_cell_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    del raw["machine"]["clamp_released_sensor"]
+    with pytest.raises(ValidationError, match="clamp_released_sensor"):
+        CellConfig.model_validate(raw)
+
+
+def test_clamp_released_sensor_must_be_a_real_bool(sim_cell_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    raw["machine"]["clamp_released_sensor"] = "yes"
+    with pytest.raises(ValidationError):
+        CellConfig.model_validate(raw)
+
+
+def test_machine_without_release_sensor_loads_with_fallback(sim_cell_raw: dict[str, Any]) -> None:
+    cfg = CellConfig.model_validate(_no_release_sensor(sim_cell_raw))
+    assert cfg.unclamp_fallback is not None
+    assert cfg.unclamp_fallback.pull_force_limit_n == 40.0
+
+
+def test_no_release_sensor_requires_fallback(sim_cell_raw: dict[str, Any]) -> None:
+    raw = _no_release_sensor(sim_cell_raw)
+    del raw["unclamp_fallback"]
+    with pytest.raises(ValidationError, match="unclamp_fallback is required"):
+        CellConfig.model_validate(raw)
+
+
+def test_release_sensor_forbids_fallback(sim_cell_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    raw["unclamp_fallback"] = _no_release_sensor(sim_cell_raw)["unclamp_fallback"]
+    with pytest.raises(ValidationError, match="must be absent"):
+        CellConfig.model_validate(raw)
+
+
+def test_release_sensor_requires_its_pin(sim_cell_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    raw["pins"]["unclamped_in"] = None
+    with pytest.raises(ValidationError, match="unclamped_in is null"):
+        CellConfig.model_validate(raw)
+
+
+def test_unclamped_pin_key_cannot_be_omitted(sim_cell_raw: dict[str, Any]) -> None:
+    raw = _no_release_sensor(sim_cell_raw)
+    del raw["pins"]["unclamped_in"]
+    with pytest.raises(ValidationError):
+        CellConfig.model_validate(raw)
+
+
+def test_fallback_pull_pose_must_exist(sim_cell_raw: dict[str, Any]) -> None:
+    raw = _no_release_sensor(sim_cell_raw)
+    raw["unclamp_fallback"]["pull_pose"] = "nowhere"
+    with pytest.raises(ValidationError, match="pull_pose"):
+        CellConfig.model_validate(raw)

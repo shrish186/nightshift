@@ -263,3 +263,83 @@ def test_gantry_sim_uses_same_interface() -> None:
     robot.move_to("safe_home")
     cell.clock.advance(10)
     assert robot.at_pose() == "safe_home"
+
+
+# --- clamp release: sensor vs. force-limited fallback ---
+
+
+def _grip_finished_part(cell: SimCell) -> None:
+    """Door open, part clamped in the fixture, arm at load with the gripper closed on it."""
+    cell.cnc.clamp()
+    cell.cnc.open_door()
+    cell.clock.advance(3)
+    cell.robot.move_to("above_fixture")
+    cell.clock.advance(10)
+    cell.robot.move_to("load")
+    cell.clock.advance(10)
+    cell.gripper.close()
+    cell.clock.advance(1)
+    assert cell.gripper.has_part() and cell.cnc.clamped()
+
+
+def _no_sensor_cell() -> SimCell:
+    raw = load_cell_config(SIM_CELL).model_dump()
+    raw["machine"]["clamp_released_sensor"] = False
+    raw["pins"]["unclamped_in"] = None
+    raw["unclamp_fallback"] = {
+        "release_wait_s": 2.0,
+        "pull_pose": "above_fixture",
+        "pull_force_limit_n": 40.0,
+    }
+    return build_sim_cell(CellConfig.model_validate(raw))
+
+
+def test_release_sensor_confirms_unclamp(cell: SimCell) -> None:
+    _grip_finished_part(cell)
+    cell.cnc.unclamp()
+    assert not cell.cnc.unclamped()
+    cell.clock.advance(1)
+    assert cell.cnc.unclamped() and not cell.cnc.clamped()
+
+
+def test_no_sensor_machine_never_reads_released() -> None:
+    cell = _no_sensor_cell()
+    _grip_finished_part(cell)
+    cell.cnc.unclamp()
+    cell.clock.advance(100)
+    assert cell.cnc.jaws() == "open"  # physically released...
+    assert not cell.cnc.unclamped()  # ...but with no sensor it never reads as released
+
+
+def test_limited_pull_succeeds_once_released() -> None:
+    cell = _no_sensor_cell()
+    _grip_finished_part(cell)
+    cell.cnc.unclamp()
+    cell.clock.advance(2)
+    cell.robot.move_to_limited("above_fixture", 40.0)
+    cell.clock.advance(10)
+    assert cell.robot.at_pose() == "above_fixture" and cell.gripper.has_part()
+    assert cell.violations == []
+
+
+def test_limited_pull_trips_when_jaws_stuck_on() -> None:
+    cell = _no_sensor_cell()
+    _grip_finished_part(cell)
+    cell.cnc.inject(CncFault.CLAMP_STUCK_ON)
+    cell.cnc.unclamp()
+    cell.clock.advance(2)
+    cell.robot.move_to_limited("above_fixture", 40.0)
+    assert cell.robot.status() is RobotStatus.FORCE_LIMIT
+    cell.clock.advance(10)
+    assert cell.robot.status() is RobotStatus.FORCE_LIMIT  # latched, not creeping on
+    assert cell.violations == []  # the limit did its job
+    cell.robot.reset()
+    assert cell.robot.status() is RobotStatus.IDLE
+
+
+def test_stuck_on_clamp_still_reads_clamped_with_sensor(cell: SimCell) -> None:
+    _grip_finished_part(cell)
+    cell.cnc.inject(CncFault.CLAMP_STUCK_ON)
+    cell.cnc.unclamp()
+    cell.clock.advance(10)
+    assert cell.cnc.clamped() and not cell.cnc.unclamped()

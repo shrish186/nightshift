@@ -48,11 +48,11 @@ class CncIo(Protocol):
         """Workholding confirmed clamped."""
 
     def unclamped(self) -> bool:
-        """Workholding confirmed released.
+        """Workholding confirmed released by its own sensor.
 
-        ASSUMPTION: some vises/chucks only have a single clamped sensor. On those,
-        unclamped() must be backed by a second sensor or a pressure switch, not
-        inferred from `not clamped()`. Flag for HW to verify per machine.
+        Never inferred from `not clamped()`. On machines configured with
+        clamp_released_sensor: false, the driver must always return False (never
+        reads as released), and the controller uses the unclamp_fallback pull test.
         """
 
     def cycle_running(self) -> bool: ...

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 REQUIRED_POSES = frozenset(
     {
@@ -42,6 +42,21 @@ class _Strict(BaseModel):
 class MachineConfig(_Strict):
     kind: Literal["vmc", "lathe"]
     controller: str
+    # Must be stated explicitly per machine: does the workholding have its own
+    # "released" sensor? If not, the controller uses the unclamp_fallback procedure.
+    clamp_released_sensor: StrictBool
+
+
+class UnclampFallback(_Strict):
+    """Used only on machines without a clamp-released sensor.
+
+    Sequence (implemented in the controller): gripper holds the part -> unclamp ->
+    wait release_wait_s -> force-limited pull to pull_pose -> force limit trips => SAFE.
+    """
+
+    release_wait_s: float = Field(gt=0)
+    pull_pose: str
+    pull_force_limit_n: float = Field(gt=0)
 
 
 class RobotConfig(_Strict):
@@ -67,6 +82,7 @@ class Pins(_Strict):
     door_closed_in: str
     clamp_out: str
     clamped_in: str
+    unclamped_in: str | None  # required key; null only when clamp_released_sensor is false
     cycle_start_out: str
     cycle_done_in: str
     feed_hold_out: str
@@ -94,6 +110,8 @@ class CellConfig(_Strict):
     timeouts_s: Timeouts
     pins: Pins
     watchman: WatchmanConfig
+    # Required when machine.clamp_released_sensor is false, forbidden when true.
+    unclamp_fallback: UnclampFallback | None = None
 
     @field_validator("poses")
     @classmethod
@@ -121,6 +139,27 @@ class CellConfig(_Strict):
                 f"poses {bad} have wrong number of axes for robot kind {self.robot.kind!r} "
                 f"(expected {sorted(allowed)})"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _clamp_release_check_is_explicit(self) -> CellConfig:
+        has_sensor = self.machine.clamp_released_sensor
+        if has_sensor:
+            if self.pins.unclamped_in is None:
+                raise ValueError("clamp_released_sensor is true but pins.unclamped_in is null")
+            if self.unclamp_fallback is not None:
+                raise ValueError(
+                    "unclamp_fallback must be absent when clamp_released_sensor is true"
+                )
+        else:
+            if self.pins.unclamped_in is not None:
+                raise ValueError("clamp_released_sensor is false but pins.unclamped_in is set")
+            if self.unclamp_fallback is None:
+                raise ValueError("clamp_released_sensor is false: unclamp_fallback is required")
+            if self.unclamp_fallback.pull_pose not in self.poses:
+                raise ValueError(
+                    f"unclamp_fallback.pull_pose {self.unclamp_fallback.pull_pose!r} not in poses"
+                )
         return self
 
 
