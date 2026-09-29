@@ -52,7 +52,8 @@ def build_sim_cell(cfg: CellConfig, seed: int = 0, cycle_s: float = DEFAULT_CYCL
 
     def check_move(origin: str, target: str, force_limit_n: float | None) -> None:
         now = f"t={clock.now():.2f}"
-        if target in zone and not (cnc.door_open() and not cnc.cycle_running()):
+        # Physical truth, not sensor readings: a lying sensor must not hide a violation.
+        if target in zone and not (cnc.door() == "open" and not cnc.spindle_running()):
             cell.robot_violations.append(
                 f"{now} arm moving to {target} with door not open or spindle running"
             )

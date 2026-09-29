@@ -13,10 +13,12 @@ loss of I/O power reads as "not safe":
 - Permissive inputs (door_open, door_closed, clamped, unclamped, cycle_done) are
   true only while the signal is actively present. A dead wire reads False, e.g.
   door NOT open, so the arm never enters on a broken wire.
-- alarm() and feed_hold_active() mean "bad" when True, so a dead wire would read
-  "no alarm". The physical input must therefore be a "machine ready / no alarm"
-  signal (energised when healthy) that the driver inverts. A dead wire then
-  reads as alarm=True.
+- alarm(), feed_hold_active() and cycle_running() mean "bad" when True, so a dead
+  wire would read "no alarm" / "spindle stopped". That last one is the permissive
+  for the arm entering the machine. Each physical input must therefore be a
+  "healthy" signal that is energised when OK ("no alarm", "not held", "spindle
+  stopped / cycle idle") and that the driver inverts. A dead wire then reads as
+  alarm=True, feed_hold_active=True, cycle_running=True.
 - Outputs that let the machine run (cycle_start) must default off on power loss.
 HW to confirm the signal polarity for every pin in cells/<cell-id>.yaml on each machine.
 """

@@ -1,4 +1,10 @@
-"""Simulated CNC machine I/O. Models door, clamp, cycle, feed hold and alarm timing."""
+"""Simulated CNC machine I/O. Models door, clamp, cycle, feed hold and alarm timing.
+
+The sim keeps *physical truth* (where the door and jaws really are, whether the
+spindle is really running) separate from *sensor readings* (what the CncIo inputs
+report). Sensor faults change only the readings. The unsafe-event log always checks
+physical truth, so a lying sensor cannot hide an unsafe event from the tests.
+"""
 
 from __future__ import annotations
 
@@ -14,11 +20,15 @@ DEFAULT_CYCLE_S = 60.0
 
 
 class CncFault(Enum):
-    DOOR_STUCK = "door_stuck"  # door stops part-way; neither open nor closed sensor
-    CLAMP_FAIL = "clamp_fail"  # clamp never confirms
+    DOOR_STUCK = "door_stuck"  # door stops part-way on its current/next move
+    CLAMP_FAIL = "clamp_fail"  # jaws never close
     ALARM = "alarm"  # machine raises an alarm
     CYCLE_HANG = "cycle_hang"  # cycle never reports done
     CLAMP_STUCK_ON = "clamp_stuck_on"  # jaws stay closed even when unclamp is commanded
+    CLAMP_JAM = "clamp_jam"  # jaws jam half-way on their current/next stroke
+    DOOR_SENSOR_SHORT = "door_sensor_short"  # both door sensors read true
+    CLAMP_SENSOR_SHORT = "clamp_sensor_short"  # both clamp sensors read true
+    IO_POWER_LOSS = "io_power_loss"  # I/O loses power: every wire reads de-energised
 
 
 class SimCnc:
@@ -29,21 +39,23 @@ class SimCnc:
         clamp_released_sensor: bool = True,
     ) -> None:
         self._clock = clock
-        self._has_released_sensor = clamp_released_sensor
-        self._jaws_frozen: str | None = None
         self._cycle_s = cycle_s
+        self._has_released_sensor = clamp_released_sensor
         self._door_target_open = False
         self._door_done_at = 0.0
-        self._door_stuck = False
+        self._door_frozen: str | None = None
+        self._door_stick_next = False
         self._clamp_cmd = False
         self._clamp_done_at = 0.0
         self._clamp_fail = False
+        self._jaws_frozen: str | None = None
         self._in_cycle = False
         self._cycle_end_at = 0.0
         self._cycle_hang = False
         self._done = False
         self._hold = False
         self._alarm = False
+        self._sensor_faults: set[CncFault] = set()
         # Wired by SimCell: True if the arm is in the machine envelope.
         self.arm_in_machine: Callable[[], bool] = lambda: False
         self.violations: list[str] = []
@@ -58,35 +70,68 @@ class SimCnc:
             self._in_cycle = False
             self._done = True
 
+    def _violation(self, what: str) -> None:
+        self.violations.append(f"t={self._clock.now():.2f} {what}")
+
+    # --- physical truth (sim only) ---
+    def door(self) -> str:
+        """Physical door position: "open", "closed" or "moving" (includes stuck half-way)."""
+        if self._door_frozen is not None:
+            return self._door_frozen
+        target = "open" if self._door_target_open else "closed"
+        return target if self._clock.now() >= self._door_done_at else "moving"
+
+    def jaws(self) -> str:
+        """Physical jaw position: "open", "closed" or "moving"."""
+        if self._jaws_frozen is not None:
+            return self._jaws_frozen
+        target = "closed" if self._clamp_cmd and not self._clamp_fail else "open"
+        return target if self._clock.now() >= self._clamp_done_at else "moving"
+
+    def spindle_running(self) -> bool:
+        self._update()
+        return self._in_cycle
+
+    def spindle_cutting(self) -> bool:
+        return self.spindle_running() and not self._hold
+
     # --- outputs ---
+    def _move_door(self, to_open: bool) -> None:
+        if self._door_frozen is not None:
+            return
+        self._door_target_open = to_open
+        self._door_done_at = self._clock.now() + DOOR_S
+        if self._door_stick_next:
+            self._door_frozen = "moving"
+
     def open_door(self) -> None:
-        if self._in_cycle:
+        if self.spindle_running():
             self._alarm = True  # real machines refuse; model as alarm
             return
-        self._door_target_open = True
-        self._door_done_at = self._clock.now() + DOOR_S
+        self._move_door(True)
 
     def close_door(self) -> None:
         if self.arm_in_machine():
-            self.violations.append(f"t={self._clock.now():.2f} door closed on arm")
-        self._door_target_open = False
-        self._door_done_at = self._clock.now() + DOOR_S
+            self._violation("door closed on arm")
+        self._move_door(False)
 
     def clamp(self) -> None:
         self._clamp_cmd = True
         self._clamp_done_at = self._clock.now() + CLAMP_S
 
     def unclamp(self) -> None:
-        if self._in_cycle:
-            self.violations.append(f"t={self._clock.now():.2f} unclamp during cycle")
+        if self.spindle_running():
+            self._violation("unclamp during cycle")
         self._clamp_cmd = False
         self._clamp_done_at = self._clock.now() + CLAMP_S
 
     def cycle_start(self) -> None:
         self._update()
         if self.arm_in_machine():
-            self.violations.append(f"t={self._clock.now():.2f} cycle start with arm in machine")
-        if not (self.door_closed() and self.clamped()) or self._alarm or self._hold:
+            self._violation("cycle start with arm in machine")
+        # The machine's own interlocks use its own (physical) door and clamp state.
+        ready = self.door() == "closed" and self.jaws() == "closed"
+        if not ready or self._alarm or self._hold:
             self._alarm = True  # real controls refuse to start; model as alarm
             return
         self._done = False
@@ -96,46 +141,53 @@ class SimCnc:
     def feed_hold(self) -> None:
         self._hold = True
 
-    # --- inputs ---
+    # --- inputs (sensor readings) ---
+    @property
+    def _powered(self) -> bool:
+        return CncFault.IO_POWER_LOSS not in self._sensor_faults
+
     def door_open(self) -> bool:
-        return (
-            self._door_target_open
-            and not self._door_stuck
-            and self._clock.now() >= self._door_done_at
-        )
+        if not self._powered:
+            return False
+        return CncFault.DOOR_SENSOR_SHORT in self._sensor_faults or self.door() == "open"
 
     def door_closed(self) -> bool:
-        return (
-            not self._door_target_open
-            and not self._door_stuck
-            and self._clock.now() >= self._door_done_at
-        )
+        if not self._powered:
+            return False
+        return CncFault.DOOR_SENSOR_SHORT in self._sensor_faults or self.door() == "closed"
 
     def clamped(self) -> bool:
-        return self.jaws() == "closed"
+        if not self._powered:
+            return False
+        return CncFault.CLAMP_SENSOR_SHORT in self._sensor_faults or self.jaws() == "closed"
 
     def unclamped(self) -> bool:
         # No sensor fitted: never reads as released (fail-safe; see CncIo.unclamped).
-        return self._has_released_sensor and self.jaws() == "open"
+        if not self._has_released_sensor or not self._powered:
+            return False
+        return CncFault.CLAMP_SENSOR_SHORT in self._sensor_faults or self.jaws() == "open"
 
+    # "Bad when true" inputs are wired inverted (see cnc_io.py), so a dead wire reads True.
     def cycle_running(self) -> bool:
-        self._update()
-        return self._in_cycle
+        return not self._powered or self.spindle_running()
 
     def cycle_done(self) -> bool:
         self._update()
-        return self._done
+        return self._powered and self._done
 
     def feed_hold_active(self) -> bool:
-        return self._hold
+        return not self._powered or self._hold
 
     def alarm(self) -> bool:
-        return self._alarm
+        return not self._powered or self._alarm
 
     # --- sim only ---
     def inject(self, fault: CncFault) -> None:
         if fault is CncFault.DOOR_STUCK:
-            self._door_stuck = True
+            if self.door() == "moving":
+                self._door_frozen = "moving"
+            else:
+                self._door_stick_next = True
         elif fault is CncFault.CLAMP_FAIL:
             self._clamp_fail = True
         elif fault is CncFault.ALARM:
@@ -144,16 +196,10 @@ class SimCnc:
             self._cycle_hang = True
         elif fault is CncFault.CLAMP_STUCK_ON:
             self._jaws_frozen = "closed"
-
-    def jaws(self) -> str:
-        """Physical jaw position: "open", "closed" or "moving"."""
-        if self._jaws_frozen is not None:
-            return self._jaws_frozen
-        target = "closed" if self._clamp_cmd and not self._clamp_fail else "open"
-        return target if self._clock.now() >= self._clamp_done_at else "moving"
-
-    def spindle_cutting(self) -> bool:
-        return self.cycle_running() and not self._hold
+        elif fault is CncFault.CLAMP_JAM:
+            self._jaws_frozen = "moving"
+        else:
+            self._sensor_faults.add(fault)
 
     def operator_clear(self) -> None:
         """A human at the machine clears alarm and feed hold."""
