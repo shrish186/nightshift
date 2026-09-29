@@ -50,13 +50,22 @@ class MachineConfig(_Strict):
 class UnclampFallback(_Strict):
     """Used only on machines without a clamp-released sensor.
 
-    Sequence (implemented in the controller): gripper holds the part -> unclamp ->
-    wait release_wait_s -> force-limited pull to pull_pose -> force limit trips => SAFE.
+    Unclamp (in the controller): gripper holds the part -> unclamp -> wait release_wait_s
+    -> force-limited pull to pull_pose -> force limit trips => SAFE.
+
+    Clamp verification: with one clamp sensor, a clamp that failed to close plus a
+    late short on that sensor looks like a clean clamp. So before the gripper lets go,
+    the robot tugs the part toward tug_pose (a few mm) with tug_force_n; the clamp must
+    resist. ASSUMPTION / VERIFY ON HARDWARE: the arm/gantry can do a force-limited move
+    that reports "resisted" without latching, and tug_force_n is well below the clamp's
+    holding force but above the part's weight and friction.
     """
 
     release_wait_s: float = Field(gt=0)
     pull_pose: str
     pull_force_limit_n: float = Field(gt=0)
+    tug_pose: str
+    tug_force_n: float = Field(gt=0)
 
 
 class ProgramConfig(_Strict):
@@ -239,6 +248,13 @@ class CellConfig(_Strict):
                     "timeouts_s.unclamp must be > unclamp_fallback.release_wait_s "
                     "(the wait happens inside the UNCLAMP_FALLBACK state)"
                 )
+            fb = self.unclamp_fallback
+            if fb.tug_pose not in self.poses:
+                raise ValueError(f"unclamp_fallback.tug_pose {fb.tug_pose!r} not in poses")
+            if fb.tug_pose not in self.machine_zone_poses:
+                raise ValueError("unclamp_fallback.tug_pose must be in machine_zone_poses")
+            if fb.tug_force_n > fb.pull_force_limit_n:
+                raise ValueError("unclamp_fallback.tug_force_n must be <= pull_force_limit_n")
             if self.unclamp_fallback.pull_pose not in self.poses:
                 raise ValueError(
                     f"unclamp_fallback.pull_pose {self.unclamp_fallback.pull_pose!r} not in poses"

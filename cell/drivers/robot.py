@@ -32,6 +32,18 @@ class Robot(Protocol):
         with a motor-current limit calibrated to newtons. Verify on hardware.
         """
 
+    def tug_test(self, pose: str, force_limit_n: float) -> None:
+        """Force-limited probe toward `pose` to check something holds the gripped part.
+
+        If resistance exceeds the limit, the robot stops, returns to where it started and
+        reports "resisted". If it reaches `pose` freely it reports "free". It never
+        latches the robot. ASSUMPTION / VERIFY ON HARDWARE (cobot force mode; gantry
+        motor-current limit calibrated to newtons).
+        """
+
+    def tug_result(self) -> str | None:
+        """None if no tug is running or done, else "pending", "resisted" or "free"."""
+
     def stop(self) -> None:
         """Protective stop. Always accepted, from any status."""
 

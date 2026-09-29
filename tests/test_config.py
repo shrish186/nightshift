@@ -59,6 +59,7 @@ GANTRY_POSES = {
     "tray_slot_3": [340, -200, 120],
     "above_fixture": [650, 0, 300],
     "load": [650, 0, 180],
+    "tug_in_fixture": [650, 0, 184],
     "clear_of_machine": [350, 0, 350],
     "above_done_tray": [300, 200, 250],
     "place_done": [300, 200, 120],
@@ -103,6 +104,8 @@ def _no_release_sensor(raw: dict[str, Any]) -> dict[str, Any]:
         "release_wait_s": 2.0,
         "pull_pose": "above_fixture",
         "pull_force_limit_n": 40.0,
+        "tug_pose": "tug_in_fixture",
+        "tug_force_n": 20.0,
     }
     return raw
 

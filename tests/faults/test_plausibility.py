@@ -120,6 +120,8 @@ def test_clamp_pair_ignored_without_release_sensor(cfg: CellConfig) -> None:
         "release_wait_s": 2.0,
         "pull_pose": "above_fixture",
         "pull_force_limit_n": 40.0,
+        "tug_pose": "tug_in_fixture",
+        "tug_force_n": 20.0,
     }
     cell = build_sim_cell(CellConfig.model_validate(raw))
     mon = _monitor(cell)

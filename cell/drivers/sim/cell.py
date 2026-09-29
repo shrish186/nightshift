@@ -81,8 +81,10 @@ def build_sim_cell(
     gripper.on_release = released
     gripper.on_grip = gripped
 
+    # The jaws grip only near fully closed (see SimCnc.jaw_contact): true at the end of a
+    # clamp stroke and the start of an unclamp stroke; not when jammed half-way.
     def holding_clamped_part() -> bool:
-        return gripper.has_part() and cnc.jaws() != "open"
+        return gripper.has_part() and cnc.jaw_contact()
 
     def check_move(origin: str, target: str, force_limit_n: float | None) -> None:
         now = f"t={clock.now():.2f}"

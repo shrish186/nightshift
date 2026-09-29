@@ -17,6 +17,7 @@ from cell.clock import Clock
 DOOR_S = 2.0
 CLAMP_S = 0.5
 DEFAULT_CYCLE_S = 60.0
+JAW_CONTACT = 0.8  # jaw position (0 open .. 1 closed) above which they grip the part
 
 
 class CncFault(Enum):
@@ -60,6 +61,7 @@ class SimCnc:
         self._clamp_cmd = False
         self._clamp_done_at = 0.0
         self._clamp_fail = False
+        self._clamp_started_closed = False  # were the jaws closed when the stroke began
         self._jaws_frozen: str | None = None
         self._in_cycle = False
         self._cycle_end_at = 0.0
@@ -98,12 +100,23 @@ class SimCnc:
         target = "open" if self._door_target_open else "closed"
         return target if self._clock.now() >= self._door_done_at else "moving"
 
+    def jaw_position(self) -> float:
+        """Physical jaw position, 0.0 = fully open .. 1.0 = fully closed on the part."""
+        if self._jaws_frozen is not None:
+            return {"closed": 1.0, "open": 0.0}.get(self._jaws_frozen, 0.5)
+        closing = self._clamp_cmd and not self._clamp_fail
+        left = max(0.0, self._clamp_done_at - self._clock.now())
+        frac = 1.0 - min(1.0, left / self._clamp_s) if self._clamp_s > 0 else 1.0
+        return frac if closing else 1.0 - frac if self._clamp_started_closed else 0.0
+
+    def jaw_contact(self) -> bool:
+        """ASSUMPTION: the jaws grip the part in the last 20% of travel toward closed."""
+        return self.jaw_position() >= JAW_CONTACT
+
     def jaws(self) -> str:
         """Physical jaw position: "open", "closed" or "moving"."""
-        if self._jaws_frozen is not None:
-            return self._jaws_frozen
-        target = "closed" if self._clamp_cmd and not self._clamp_fail else "open"
-        return target if self._clock.now() >= self._clamp_done_at else "moving"
+        pos = self.jaw_position()
+        return "closed" if pos >= 1.0 else "open" if pos <= 0.0 else "moving"
 
     def seat(self) -> str:
         """Physical part state in the fixture: "empty", "seated" or "crooked".
@@ -158,12 +171,14 @@ class SimCnc:
         self._move_door(False)
 
     def clamp(self) -> None:
+        self._clamp_started_closed = self.jaw_position() >= 1.0
         self._clamp_cmd = True
         self._clamp_done_at = self._clock.now() + self._clamp_s
 
     def unclamp(self) -> None:
         if self.spindle_running():
             self._violation("unclamp during cycle")
+        self._clamp_started_closed = self.jaw_position() >= 1.0
         self._clamp_cmd = False
         self._clamp_done_at = self._clock.now() + self._clamp_s
 

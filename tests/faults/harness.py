@@ -87,6 +87,8 @@ def make_cfg(no_release_sensor: bool = False, cycle_s: float = CYCLE_S) -> CellC
             "release_wait_s": 2.0,
             "pull_pose": "above_fixture",
             "pull_force_limit_n": 40.0,
+            "tug_pose": "tug_in_fixture",
+            "tug_force_n": 20.0,
         }
     return CellConfig.model_validate(raw)
 

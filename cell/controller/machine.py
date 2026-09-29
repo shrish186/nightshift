@@ -80,6 +80,14 @@ class Dwell:
 
 
 @dataclass(frozen=True)
+class Tug:
+    """Force-limited tug on the gripped part: the clamp must resist. Free -> SAFE."""
+
+    pose: str
+    force_limit_n: float
+
+
+@dataclass(frozen=True)
 class Require:
     """Checked once, in order. False -> SAFE."""
 
@@ -87,7 +95,7 @@ class Require:
     cond: Callable[[Ctx], bool]
 
 
-Step: TypeAlias = Move | MoveLimited | Command | WaitUntil | Dwell | Require
+Step: TypeAlias = Move | MoveLimited | Command | WaitUntil | Dwell | Require | Tug
 
 # A guard returns None when OK, or the reason it failed.
 Guard: TypeAlias = Callable[[Ctx], str | None]
@@ -174,6 +182,25 @@ def _open_door_steps(_: CellConfig) -> tuple[Step, ...]:
     )
 
 
+def _clamp_steps(cfg: CellConfig) -> tuple[Step, ...]:
+    steps: list[Step] = [
+        WaitUntil("part seated in fixture", lambda c: c.cnc.part_present()),
+        Command("clamp", lambda c: c.cnc.clamp()),
+        WaitUntil("clamped", _clamp_confirmed),
+        WaitUntil("clamp worst-case stroke time", lambda c: c.stroke_done("clamp")),
+    ]
+    fb = cfg.unclamp_fallback
+    if fb is not None:
+        # One clamp sensor can't prove the jaws closed (a late short looks like a clean
+        # stroke). Before letting go, tug the part: the clamp must hold it.
+        steps.append(Tug(fb.tug_pose, fb.tug_force_n))
+    steps += [
+        Command("gripper open", lambda c: c.gripper.open()),
+        WaitUntil("gripper open", lambda c: c.gripper.is_open()),
+    ]
+    return tuple(steps)
+
+
 def _fallback_steps(cfg: CellConfig) -> tuple[Step, ...]:
     fb = cfg.unclamp_fallback
     if fb is None:  # config validation makes this impossible; fail closed anyway
@@ -239,14 +266,7 @@ STATE_TABLE: dict[State, StateSpec] = {
         _goto(State.CLAMP),
     ),
     State.CLAMP: _spec(
-        _fixed(
-            WaitUntil("part seated in fixture", lambda c: c.cnc.part_present()),
-            Command("clamp", lambda c: c.cnc.clamp()),
-            WaitUntil("clamped", _clamp_confirmed),
-            WaitUntil("clamp worst-case stroke time", lambda c: c.stroke_done("clamp")),
-            Command("gripper open", lambda c: c.gripper.open()),
-            WaitUntil("gripper open", lambda c: c.gripper.is_open()),
-        ),
+        _clamp_steps,
         _INSIDE,
         lambda cfg, p: cfg.timeouts_s.clamp,
         _goto(State.RETREAT),
@@ -582,6 +602,13 @@ class CellController:
             return step.cond(c)
         if isinstance(step, Dwell):
             return self._clock.now() - self._step_started_at >= step.seconds
+        if isinstance(step, Tug):
+            if first:
+                c.robot.tug_test(step.pose, step.force_limit_n)
+            result = c.robot.tug_result()
+            if result == "free":
+                raise _GoSafe(f"{self.state.value}: clamp did not hold the part (tug test)")
+            return result == "resisted"
         if isinstance(step, Require):
             if not step.cond(c):
                 raise _GoSafe(f"{self.state.value} requirement failed: {step.label}")

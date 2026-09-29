@@ -18,13 +18,14 @@ poses:
   pick_raw:         [300, -200, 120, 180, 0, 0]
   above_fixture:    [650, 0, 300, 180, 0, 0]
   load:             [650, 0, 180, 180, 0, 0]
+  tug_in_fixture:   [650, 0, 184, 180, 0, 0]  # 4 mm up from load: single-sensor clamp tug
   clear_of_machine: [350, 0, 350, 180, 0, 0]
   above_done_tray:  [300, 200, 250, 180, 0, 0]
   place_done:       [300, 200, 120, 180, 0, 0]
 
 # Poses where the arm is inside the machine envelope. The door must be confirmed
 # fully open and the spindle stopped before the arm may be at or moving to these.
-machine_zone_poses: [above_fixture, load]
+machine_zone_poses: [above_fixture, load, tug_in_fixture]
 
 # CNC programs this cell runs. expected_cycle_s: measured per program (VERIFY ON HARDWARE).
 programs:

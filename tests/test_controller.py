@@ -468,3 +468,40 @@ def test_reset_refused_unless_door_reads_closed(how: str) -> None:
     cell.cnc.operator_clear()
     why = ctrl.reset("asha")
     assert why is not None and "door not confirmed closed" in why
+
+
+# --- single-sensor clamp: tug test before letting go ---
+
+
+def test_tug_test_catches_clamp_failure_hidden_by_late_sensor_short() -> None:
+    """Hypothesis found this: no released sensor, the clamp never closes, and the one
+    clamped sensor shorts on ~0.6 s after the command, which looks like a clean stroke.
+    The tug test must find the part is not held, before the gripper lets go."""
+    cell = new_cell(no_release_sensor=True)
+    ctrl, _ = make(cell)
+    cell.cnc.inject(CncFault.CLAMP_FAIL)
+    assert ctrl.start_cycle(PROGRAM)
+    run_one_cycle_until(cell, ctrl, S.CLAMP)
+    while cell.cnc.seat() != "seated" or not cell.gripper.has_part():
+        ctrl.step()
+        cell.clock.advance(0.1)
+    for _ in range(6):  # clamp commanded, "stroke" under way
+        ctrl.step()
+        cell.clock.advance(0.1)
+    cell.cnc.inject(CncFault.CLAMP_SENSOR_SHORT)
+    for _ in range(300):
+        ctrl.step()
+        if ctrl.state is S.SAFE:
+            break
+        cell.clock.advance(0.1)
+    assert ctrl.state is S.SAFE
+    assert "tug" in ctrl.last_safe_reason
+    assert cell.violations == []
+    assert cell.gripper.has_part()  # never let go
+
+
+def test_normal_single_sensor_cycle_passes_the_tug_test() -> None:
+    cell = new_cell(no_release_sensor=True)
+    ctrl, _ = make(cell)
+    run_one_cycle(cell, ctrl)
+    assert ctrl.state is S.IDLE and cell.violations == []

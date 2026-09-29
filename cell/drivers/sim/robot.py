@@ -39,6 +39,7 @@ class SimRobot:
         self._status = RobotStatus.IDLE
         self._stall = False
         self._force_limit_n: float | None = None
+        self._tug: str | None = None  # None, "pending", "resisted", "free"
         # Wired by SimCell: called as (origin, target, force_limit_n) when a move starts,
         # to record unsafe moves.
         self.on_move_start: Callable[[str, str, float | None], None] | None = None
@@ -51,6 +52,12 @@ class SimRobot:
             and self._force_limit_n is not None
             and self.resistance_n(self._origin) > self._force_limit_n
         ):
+            if self._tug == "pending":  # a tug stops and returns; it never latches
+                self._pose, self._origin, self._target = self._origin, None, None
+                self._status = RobotStatus.IDLE
+                self._force_limit_n = None
+                self._tug = "resisted"
+                return
             self._status = RobotStatus.FORCE_LIMIT  # stopped mid-move; origin/target kept
             return
         if (
@@ -61,6 +68,8 @@ class SimRobot:
             self._pose, self._origin, self._target = self._target, None, None
             self._status = RobotStatus.IDLE
             self._force_limit_n = None
+            if self._tug == "pending":
+                self._tug = "free"
 
     def move_to(self, pose: str) -> None:
         self._start_move(pose, None)
@@ -68,10 +77,23 @@ class SimRobot:
     def move_to_limited(self, pose: str, force_limit_n: float) -> None:
         self._start_move(pose, force_limit_n)
 
+    def tug_test(self, pose: str, force_limit_n: float) -> None:
+        self._update()
+        if self._status is not RobotStatus.IDLE:
+            return
+        self._tug = "pending"
+        self._start_move(pose, force_limit_n)
+
+    def tug_result(self) -> str | None:
+        self._update()
+        return self._tug
+
     def _start_move(self, pose: str, force_limit_n: float | None) -> None:
         if pose not in self._poses:
             raise ValueError(f"unknown pose {pose!r}")
         self._update()
+        if self._tug in ("resisted", "free") and self._status is RobotStatus.IDLE:
+            self._tug = None  # a new move clears the previous tug result
         if self._status is not RobotStatus.IDLE or self._pose is None:
             return
         if self.on_move_start is not None:

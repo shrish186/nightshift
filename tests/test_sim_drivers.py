@@ -296,6 +296,8 @@ def _no_sensor_cell() -> SimCell:
         "release_wait_s": 2.0,
         "pull_pose": "above_fixture",
         "pull_force_limit_n": 40.0,
+        "tug_pose": "tug_in_fixture",
+        "tug_force_n": 20.0,
     }
     return build_sim_cell(CellConfig.model_validate(raw))
 
@@ -463,3 +465,21 @@ def test_gripper_jammed_open_stays_open(cell: SimCell) -> None:
     cell.gripper.close()
     cell.clock.advance(5)
     assert cell.gripper.is_open() and not cell.gripper.is_closed()
+
+
+@pytest.mark.parametrize(("clamped", "expect"), [(True, "resisted"), (False, "free")])
+def test_tug_test_reports_whether_the_clamp_holds(clamped: bool, expect: str) -> None:
+    cell = _no_sensor_cell()
+    _grip_finished_part(cell)  # clamped part in the fixture, gripper holding it
+    if not clamped:
+        cell.cnc.unclamp()
+        cell.clock.advance(1)
+    fb = cell.cfg.unclamp_fallback
+    assert fb is not None
+    cell.robot.tug_test(fb.tug_pose, fb.tug_force_n)
+    assert cell.robot.tug_result() == "pending" or expect == "resisted"
+    cell.clock.advance(3)
+    assert cell.robot.tug_result() == expect
+    assert cell.robot.status() is RobotStatus.IDLE  # a tug never latches the robot
+    assert cell.robot.at_pose() == ("load" if expect == "resisted" else fb.tug_pose)
+    assert cell.violations == []
