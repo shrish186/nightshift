@@ -59,6 +59,14 @@ class UnclampFallback(_Strict):
     pull_force_limit_n: float = Field(gt=0)
 
 
+class ProgramConfig(_Strict):
+    """One CNC program the cell runs. ASSUMPTION / VERIFY ON HARDWARE: expected_cycle_s
+    is measured on the machine for this program, not estimated."""
+
+    expected_cycle_s: float = Field(gt=0)
+    tool: str  # the tool (or tool set) this program cuts with; watchman references key on it
+
+
 class RobotConfig(_Strict):
     kind: Literal["cobot6", "gantry"]
 
@@ -68,7 +76,8 @@ class Timeouts(_Strict):
     load: float = Field(gt=0)
     clamp: float = Field(gt=0)
     retreat: float = Field(gt=0)
-    machining: float = Field(gt=0)
+    # MACHINING timeout = active program's expected_cycle_s x machining_factor.
+    machining_factor: float = Field(gt=1)
     unclamp: float = Field(gt=0)
     unload: float = Field(gt=0)
     place_done: float = Field(gt=0)
@@ -154,6 +163,7 @@ class CellConfig(_Strict):
     robot: RobotConfig
     poses: dict[str, Pose]
     machine_zone_poses: frozenset[str]
+    programs: dict[str, ProgramConfig]
     timeouts_s: Timeouts
     io_plausibility: IoPlausibility
     pins: Pins
@@ -167,6 +177,13 @@ class CellConfig(_Strict):
         missing = REQUIRED_POSES - v.keys()
         if missing:
             raise ValueError(f"missing poses: {sorted(missing)}")
+        return v
+
+    @field_validator("programs")
+    @classmethod
+    def _at_least_one_program(cls, v: dict[str, ProgramConfig]) -> dict[str, ProgramConfig]:
+        if not v:
+            raise ValueError("programs must not be empty")
         return v
 
     @model_validator(mode="after")

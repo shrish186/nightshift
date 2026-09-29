@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 from cell.clock import Clock
-from cell.config import CellConfig
+from cell.config import CellConfig, ProgramConfig
 from cell.controller.alerts import Alert, Alerter
 from cell.controller.plausibility import IoPlausibilityMonitor
 from cell.controller.states import State
@@ -95,7 +95,7 @@ Guard: TypeAlias = Callable[[Ctx], str | None]
 class StateSpec:
     steps: Callable[[CellConfig], tuple[Step, ...]]
     guards: tuple[Guard, ...]
-    timeout: Callable[[CellConfig], float]
+    timeout: Callable[[CellConfig, ProgramConfig], float]  # (cell config, active program)
     next_states: frozenset[State]
     next: Callable[[CellConfig], State]
 
@@ -193,7 +193,7 @@ def _goto(state: State) -> tuple[frozenset[State], Callable[[CellConfig], State]
 def _spec(
     steps: Callable[[CellConfig], tuple[Step, ...]],
     guards: tuple[Guard, ...],
-    timeout: Callable[[CellConfig], float],
+    timeout: Callable[[CellConfig, ProgramConfig], float],
     to: tuple[frozenset[State], Callable[[CellConfig], State]],
 ) -> StateSpec:
     return StateSpec(steps, guards, timeout, to[0], to[1])
@@ -214,13 +214,13 @@ STATE_TABLE: dict[State, StateSpec] = {
             Move("above_raw_tray"),
         ),
         (),
-        lambda cfg: cfg.timeouts_s.pick_raw,
+        lambda cfg, p: cfg.timeouts_s.pick_raw,
         _goto(State.OPEN_DOOR_LOAD),
     ),
     State.OPEN_DOOR_LOAD: _spec(
         _open_door_steps,
         (spindle_stopped,),
-        lambda cfg: cfg.timeouts_s.door,
+        lambda cfg, p: cfg.timeouts_s.door,
         _goto(State.LOAD),
     ),
     State.LOAD: _spec(
@@ -232,7 +232,7 @@ STATE_TABLE: dict[State, StateSpec] = {
             Require("raw part in gripper", _has_part),
         ),
         _INSIDE,
-        lambda cfg: cfg.timeouts_s.load,
+        lambda cfg, p: cfg.timeouts_s.load,
         _goto(State.CLAMP),
     ),
     State.CLAMP: _spec(
@@ -244,13 +244,13 @@ STATE_TABLE: dict[State, StateSpec] = {
             WaitUntil("gripper open", lambda c: c.gripper.is_open()),
         ),
         _INSIDE,
-        lambda cfg: cfg.timeouts_s.clamp,
+        lambda cfg, p: cfg.timeouts_s.clamp,
         _goto(State.RETREAT),
     ),
     State.RETREAT: _spec(
         _fixed(Move("above_fixture"), Move("clear_of_machine")),
         _INSIDE,
-        lambda cfg: cfg.timeouts_s.retreat,
+        lambda cfg, p: cfg.timeouts_s.retreat,
         _goto(State.CLOSE_DOOR),
     ),
     State.CLOSE_DOOR: _spec(
@@ -259,7 +259,7 @@ STATE_TABLE: dict[State, StateSpec] = {
             WaitUntil("door closed", lambda c: c.cnc.door_closed() and not c.cnc.door_open()),
         ),
         (arm_outside_machine,),
-        lambda cfg: cfg.timeouts_s.door,
+        lambda cfg, p: cfg.timeouts_s.door,
         _goto(State.MACHINING),
     ),
     State.MACHINING: _spec(
@@ -268,13 +268,13 @@ STATE_TABLE: dict[State, StateSpec] = {
             WaitUntil("cycle done", lambda c: c.cnc.cycle_done()),
         ),
         (no_feed_hold, machine_ready_to_cut),
-        lambda cfg: cfg.timeouts_s.machining,
+        lambda cfg, p: p.expected_cycle_s * cfg.timeouts_s.machining_factor,
         _goto(State.OPEN_DOOR_UNLOAD),
     ),
     State.OPEN_DOOR_UNLOAD: _spec(
         _open_door_steps,
         (spindle_stopped,),
-        lambda cfg: cfg.timeouts_s.door,
+        lambda cfg, p: cfg.timeouts_s.door,
         _goto(State.ENTER_UNLOAD),
     ),
     State.ENTER_UNLOAD: _spec(
@@ -288,7 +288,7 @@ STATE_TABLE: dict[State, StateSpec] = {
             Require("finished part in gripper", _has_part),
         ),
         _INSIDE,
-        lambda cfg: cfg.timeouts_s.unload,
+        lambda cfg, p: cfg.timeouts_s.unload,
         # The only way out is through a release check. Which one is fixed by config.
         (
             frozenset({State.UNCLAMP, State.UNCLAMP_FALLBACK}),
@@ -304,19 +304,19 @@ STATE_TABLE: dict[State, StateSpec] = {
             Move("above_fixture"),
         ),
         _INSIDE,
-        lambda cfg: cfg.timeouts_s.unclamp,
+        lambda cfg, p: cfg.timeouts_s.unclamp,
         _goto(State.EXIT),
     ),
     State.UNCLAMP_FALLBACK: _spec(
         _fallback_steps,
         _INSIDE,
-        lambda cfg: cfg.timeouts_s.unclamp,
+        lambda cfg, p: cfg.timeouts_s.unclamp,
         _goto(State.EXIT),
     ),
     State.EXIT: _spec(
         _fixed(Move("clear_of_machine")),
         _INSIDE,
-        lambda cfg: cfg.timeouts_s.retreat,
+        lambda cfg, p: cfg.timeouts_s.retreat,
         _goto(State.PLACE_DONE),
     ),
     State.PLACE_DONE: _spec(
@@ -330,7 +330,7 @@ STATE_TABLE: dict[State, StateSpec] = {
             Move("home"),
         ),
         (),
-        lambda cfg: cfg.timeouts_s.place_done,
+        lambda cfg, p: cfg.timeouts_s.place_done,
         _goto(State.IDLE),
     ),
 }
@@ -375,6 +375,7 @@ class CellController:
         self.last_safe_reason = ""
         self.history: list[Transition] = []
         self._start_requested = False
+        self.program: str | None = None  # active CNC program, set by start_cycle()
         self._safe_requested: str | None = None
         self._entered_at = clock.now()
         self._steps: tuple[Step, ...] = ()
@@ -383,10 +384,24 @@ class CellController:
         self._step_started_at = 0.0
 
     # --- public API ---
-    def start_cycle(self) -> bool:
-        """Request one cycle. Only accepted in IDLE."""
+    def start_cycle(self, program: str) -> bool:
+        """Request one cycle of a configured CNC program. Only accepted in IDLE."""
         if self.state is not State.IDLE or self._start_requested:
             return False
+        if program not in self._cfg.programs:
+            log.info(
+                "start refused",
+                extra={
+                    "fields": {
+                        "event": "start_refused",
+                        "reason": f"unknown program {program!r}",
+                        "ts": self._clock.now(),
+                        "cell_id": self._cfg.cell_id,
+                    }
+                },
+            )
+            return False
+        self.program = program
         self._start_requested = True
         return True
 
@@ -477,7 +492,10 @@ class CellController:
             why = guard(self._ctx)
             if why is not None:
                 raise _GoSafe(f"{self.state.value} guard {guard.__name__}: {why}")
-        if self._clock.now() - self._entered_at > spec.timeout(self._cfg):
+        if self.program is None:
+            raise _GoSafe(f"{self.state.value}: no active program")
+        timeout = spec.timeout(self._cfg, self._cfg.programs[self.program])
+        if self._clock.now() - self._entered_at > timeout:
             raise _GoSafe(f"{self.state.value} timeout: {self._describe_step()}")
 
         while self._step_idx < len(self._steps):

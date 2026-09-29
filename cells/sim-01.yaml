@@ -26,13 +26,19 @@ poses:
 # fully open and the spindle stopped before the arm may be at or moving to these.
 machine_zone_poses: [above_fixture, load]
 
+# CNC programs this cell runs. expected_cycle_s: measured per program (VERIFY ON HARDWARE).
+programs:
+  P100:
+    expected_cycle_s: 60
+    tool: T12
+
 # Max seconds allowed in each state before the controller goes to SAFE.
 timeouts_s:
   pick_raw: 20
   load: 20
   clamp: 5
   retreat: 15
-  machining: 600
+  machining_factor: 1.5  # MACHINING timeout = program expected_cycle_s x this
   unclamp: 5
   unload: 20
   place_done: 20

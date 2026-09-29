@@ -15,7 +15,7 @@ from cell.drivers.robot import RobotStatus
 from cell.drivers.sim.cell import SimCell
 from cell.drivers.sim.cnc import CncFault
 from cell.log import JsonFormatter
-from tests.faults.harness import new_cell
+from tests.faults.harness import PROGRAM, new_cell
 
 S = State
 
@@ -49,7 +49,7 @@ def make(cell: SimCell) -> tuple[CellController, MemoryAlerter]:
 
 
 def run_one_cycle(cell: SimCell, ctrl: CellController, max_s: float = 200.0) -> None:
-    assert ctrl.start_cycle()
+    assert ctrl.start_cycle(PROGRAM)
     start = ctrl.cycles_completed
     t0 = cell.clock.now()
     while cell.clock.now() - t0 < max_s:
@@ -109,10 +109,10 @@ def test_every_transition_logged_as_json(caplog: pytest.LogCaptureFixture) -> No
 def test_start_cycle_only_from_idle() -> None:
     cell = new_cell()
     ctrl, _ = make(cell)
-    assert ctrl.start_cycle()
+    assert ctrl.start_cycle(PROGRAM)
     ctrl.step()
     assert ctrl.state is S.PICK_RAW
-    assert not ctrl.start_cycle()
+    assert not ctrl.start_cycle(PROGRAM)
 
 
 def test_idle_does_nothing_without_start() -> None:
@@ -135,7 +135,7 @@ def test_every_working_state_has_a_spec() -> None:
 def test_every_spec_has_timeout_and_next_state() -> None:
     cfg = new_cell().cfg
     for state, spec in STATE_TABLE.items():
-        assert spec.timeout(cfg) > 0, state
+        assert spec.timeout(cfg, next(iter(cfg.programs.values()))) > 0, state
         assert spec.next_states, state
         assert S.SAFE not in spec.next_states  # SAFE is reachable from anywhere, never "next"
 
@@ -175,7 +175,7 @@ def test_safe_is_latched() -> None:
         ctrl.step()
         cell.clock.advance(0.1)
     assert ctrl.state is S.SAFE and len(ctrl.history) == n
-    assert not ctrl.start_cycle()
+    assert not ctrl.start_cycle(PROGRAM)
 
 
 def test_estop_while_idle_goes_safe() -> None:
@@ -213,7 +213,7 @@ def test_reset_refused_until_cleared(block: Callable[[SimCell], None], expect: s
 def test_reset_refused_with_arm_inside_machine() -> None:
     cell = new_cell()
     ctrl, _ = make(cell)
-    assert ctrl.start_cycle()
+    assert ctrl.start_cycle(PROGRAM)
     run_one_cycle_until(cell, ctrl, S.CLAMP)
     ctrl.request_safe("test")
     ctrl.step()
@@ -226,7 +226,7 @@ def test_reset_refused_with_arm_inside_machine() -> None:
 def test_reset_refused_when_arm_position_unknown() -> None:
     cell = new_cell()
     ctrl, _ = make(cell)
-    assert ctrl.start_cycle()
+    assert ctrl.start_cycle(PROGRAM)
     for _ in range(100):  # step until the arm is mid-move
         ctrl.step()
         if cell.robot.status() is RobotStatus.MOVING:
@@ -325,7 +325,7 @@ def test_reset_never_unlatches_robot_unless_arm_is_outside(
 ) -> None:
     cell = new_cell()
     ctrl, _ = make(cell)
-    assert ctrl.start_cycle()
+    assert ctrl.start_cycle(PROGRAM)
     if where == "inside":
         run_one_cycle_until(cell, ctrl, S.CLAMP)
         ctrl.request_safe("test")
@@ -356,7 +356,7 @@ def test_reset_never_unlatches_robot_unless_arm_is_outside(
 def test_feed_hold_pressed_mid_cut_goes_safe_at_once() -> None:
     cell = new_cell()
     ctrl, alerter = make(cell)
-    assert ctrl.start_cycle()
+    assert ctrl.start_cycle(PROGRAM)
     run_one_cycle_until(cell, ctrl, S.MACHINING)
     for _ in range(30):  # 3 s into the cut
         ctrl.step()
@@ -366,3 +366,29 @@ def test_feed_hold_pressed_mid_cut_goes_safe_at_once() -> None:
     ctrl.step()
     assert ctrl.state.value == S.SAFE.value  # (.value: mypy keeps the narrowing above)
     assert "feed hold during machining" in alerter.alerts[0].reason
+
+
+# --- per-program machining timeout ---
+
+
+def test_hung_cycle_times_out_at_program_expected_time_times_factor() -> None:
+    cell = new_cell(cycle_s=10.0)
+    ctrl, _ = make(cell)
+    cell.cnc.inject(CncFault.CYCLE_HANG)
+    assert ctrl.start_cycle(PROGRAM)
+    run_one_cycle_until(cell, ctrl, S.MACHINING)
+    entered = cell.clock.now()
+    while ctrl.state is S.MACHINING and cell.clock.now() - entered < 100:
+        ctrl.step()
+        cell.clock.advance(0.1)
+    limit = 10.0 * cell.cfg.timeouts_s.machining_factor
+    assert "MACHINING timeout" in ctrl.last_safe_reason
+    assert limit <= cell.clock.now() - entered <= limit + 0.3
+
+
+def test_unknown_program_is_refused() -> None:
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    assert not ctrl.start_cycle("NOPE")
+    ctrl.step()
+    assert ctrl.state is S.IDLE and ctrl.history == []

@@ -16,7 +16,7 @@ from cell.drivers.sim.cell import SimCell
 from cell.drivers.sim.cnc import CncFault
 from cell.drivers.sim.gripper import GripperFault
 from cell.drivers.sim.robot import RobotFault
-from tests.faults.harness import new_cell
+from tests.faults.harness import PROGRAM, new_cell
 
 S = State
 STOPPED = (RobotStatus.STOPPED, RobotStatus.FAULT, RobotStatus.FORCE_LIMIT)
@@ -115,7 +115,7 @@ CASES = {
 def test_fault_goes_safe(case: Case) -> None:
     cell = new_cell(case.no_release_sensor)
     ctrl, alerter = make(cell)
-    assert ctrl.start_cycle()
+    assert ctrl.start_cycle(PROGRAM)
     run_until(cell, ctrl, lambda: ctrl.state is case.at)
     assert ctrl.state is case.at, ctrl.last_safe_reason
     case.act(cell, ctrl)

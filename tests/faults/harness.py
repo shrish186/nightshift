@@ -30,6 +30,8 @@ from tests.conftest import SIM_CELL
 
 DT = 0.1
 CYCLE_S = 10.0
+PROGRAM = "P1"  # the test program; expected_cycle_s matches the sim's cycle length
+TOOL = "T1"
 
 
 class HumanAction(Enum):
@@ -74,9 +76,9 @@ def inject(cell: SimCell, fault: Fault) -> None:
 
 
 def make_cfg(no_release_sensor: bool = False, cycle_s: float = CYCLE_S) -> CellConfig:
-    """sim-01 with a short machining timeout so hung cycles resolve quickly in tests."""
+    """sim-01 with one test program whose expected cycle matches the sim's cycle length."""
     raw: dict[str, Any] = load_cell_config(SIM_CELL).model_dump()
-    raw["timeouts_s"]["machining"] = max(cycle_s, CYCLE_S) * 3
+    raw["programs"] = {PROGRAM: {"expected_cycle_s": cycle_s, "tool": TOOL}}
     if no_release_sensor:
         raw["machine"]["clamp_released_sensor"] = False
         raw["pins"]["unclamped_in"] = None
@@ -147,11 +149,13 @@ class ControllerRunner:
     done = back in IDLE with one more cycle; stopped = SAFE.
     """
 
-    def __init__(self, ctrl: CellController, watchman: Watchman | None = None) -> None:
+    def __init__(
+        self, ctrl: CellController, watchman: Watchman | None = None, program: str = PROGRAM
+    ) -> None:
         self.ctrl = ctrl
         self.watchman = watchman
         self._start = ctrl.cycles_completed
-        ctrl.start_cycle()
+        ctrl.start_cycle(program)
 
     @property
     def done(self) -> bool:
