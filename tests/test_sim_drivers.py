@@ -186,6 +186,8 @@ def test_sensors_follow_spindle(cell: SimCell) -> None:
     idle = cell.sensors.read()
     assert idle is not None and idle.spindle_current_a < 3
     _load_and_start(cell)
+    cell.sensors.read()  # first sample of the cut starts the spindle ramp
+    cell.clock.advance(1)
     cut = cell.sensors.read()
     assert cut is not None and cut.spindle_current_a > CUT_CURRENT_A * 0.8
 
@@ -199,6 +201,8 @@ def test_sensors_follow_spindle(cell: SimCell) -> None:
 )
 def test_sensor_faults(cell: SimCell, fault: SensorFault, check: object) -> None:
     _load_and_start(cell)
+    cell.sensors.read()
+    cell.clock.advance(1)
     cell.sensors.inject(fault)
     frame = cell.sensors.read()
     assert frame is not None and callable(check) and check(frame.spindle_current_a)
@@ -207,6 +211,7 @@ def test_sensor_faults(cell: SimCell, fault: SensorFault, check: object) -> None
 def test_chip_buildup_drifts_up() -> None:
     cell = build_sim_cell(load_cell_config(SIM_CELL), cycle_s=1000.0)
     _load_and_start(cell)
+    cell.sensors.read()
     cell.sensors.inject(SensorFault.CHIP_BUILDUP)
     cell.clock.advance(60)
     frame = cell.sensors.read()
@@ -427,3 +432,24 @@ def test_part_present_reads_false_on_power_loss(cell: SimCell) -> None:
     _arm_at_load_holding_raw(cell)
     cell.cnc.inject(CncFault.IO_POWER_LOSS)
     assert not cell.cnc.part_present()
+
+
+def test_tool_wear_grows_cycle_over_cycle() -> None:
+    from cell.drivers.sim.sensors import SimSensors
+
+    clock_cell = build_sim_cell(load_cell_config(SIM_CELL))
+    cutting = [False]
+    sensors = SimSensors(clock_cell.clock, cutting=lambda: cutting[0], seed=1, noise=False)
+    sensors.inject(SensorFault.TOOL_WEAR)
+    means = []
+    for _ in range(3):
+        cutting[0] = True
+        sensors.read()
+        clock_cell.clock.advance(2)
+        frame = sensors.read()
+        assert frame is not None
+        means.append(frame.spindle_current_a)
+        cutting[0] = False
+        sensors.read()
+    assert means[0] < means[1] < means[2]
+    assert means[2] / means[0] == pytest.approx(1.2)

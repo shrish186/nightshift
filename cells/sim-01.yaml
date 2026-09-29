@@ -63,14 +63,23 @@ pins:
   estop_ok_in: "X1.0"
   guard_closed_in: "X1.1"
 
+# Watchman thresholds. ASSUMPTION / VERIFY ON HARDWARE: tune from M1 data.
 watchman:
   sample_hz: 100
   stale_after_s: 0.5
-  baseline_window_s: 30
-  # Tool break: cutting current falls below this fraction of baseline.
-  tool_break_current_ratio: 0.4
-  # Jam/overload: absolute spindle current ceiling.
+  cut_settle_s: 1.0
+  # STOP: cutting current below this fraction of this cycle's settled mean, for confirm_s.
+  tool_break_current_ratio: 0.5
+  tool_break_confirm_s: 0.3
+  # STOP: current or vibration above these, for confirm_s.
   overload_current_a: 25.0
   vibration_rms_max_g: 3.0
-  # Chip buildup: baseline current drifts above this fraction of the first-cycle baseline.
-  chip_drift_ratio: 1.3
+  overload_confirm_s: 0.3
+  # Chip buildup (within a cycle): recent chip_window_s mean / this cycle's early mean.
+  chip_window_s: 2.0
+  chip_alert_ratio: 1.2
+  chip_stop_ratio: 1.5
+  # Tool wear (across cycles): a cycle's mean cutting current / the reference cycles' mean.
+  wear_alert_ratio: 1.25
+  wear_stop_ratio: 1.5
+  reference_cycles: 1

@@ -116,13 +116,36 @@ class Pins(_Strict):
 
 
 class WatchmanConfig(_Strict):
+    """Watchman thresholds. ASSUMPTION / VERIFY ON HARDWARE: every value is a placeholder
+    until tuned from M1 data per machine, tool and material.
+
+    Graded responses: tool break, overload and stale data stop the cell. Chip buildup
+    and tool wear only alert, and stop only past their separate hard *_stop_ratio.
+    """
+
     sample_hz: float = Field(gt=0)
     stale_after_s: float = Field(gt=0)
-    baseline_window_s: float = Field(gt=0)
+    cut_settle_s: float = Field(ge=0)  # ignore spindle ramp-up at the start of each cut
     tool_break_current_ratio: float = Field(gt=0, lt=1)
+    tool_break_confirm_s: float = Field(gt=0)
     overload_current_a: float = Field(gt=0)
     vibration_rms_max_g: float = Field(gt=0)
-    chip_drift_ratio: float = Field(gt=1)
+    overload_confirm_s: float = Field(gt=0)
+    chip_window_s: float = Field(gt=0)
+    chip_alert_ratio: float = Field(gt=1)
+    chip_stop_ratio: float = Field(gt=1)
+    wear_alert_ratio: float = Field(gt=1)
+    wear_stop_ratio: float = Field(gt=1)
+    # ASSUMPTION: the tool is good for the first reference_cycles after the watchman starts.
+    reference_cycles: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _stop_above_alert(self) -> WatchmanConfig:
+        if self.chip_stop_ratio <= self.chip_alert_ratio:
+            raise ValueError("chip_stop_ratio must be > chip_alert_ratio")
+        if self.wear_stop_ratio <= self.wear_alert_ratio:
+            raise ValueError("wear_stop_ratio must be > wear_alert_ratio")
+        return self
 
 
 class CellConfig(_Strict):
