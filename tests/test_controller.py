@@ -489,13 +489,15 @@ def test_tug_test_catches_clamp_failure_hidden_by_late_sensor_short() -> None:
         ctrl.step()
         cell.clock.advance(0.1)
     cell.cnc.inject(CncFault.CLAMP_SENSOR_SHORT)
+    shorted_at = cell.clock.now()
     for _ in range(300):
         ctrl.step()
         if ctrl.state is S.SAFE:
             break
         cell.clock.advance(0.1)
     assert ctrl.state is S.SAFE
-    assert "tug" in ctrl.last_safe_reason
+    assert "clamp did not hold the part (tug test)" in ctrl.last_safe_reason
+    assert cell.clock.now() - shorted_at < 2.0  # the tug, not the clamp timeout
     assert cell.violations == []
     assert cell.gripper.has_part()  # never let go
 
