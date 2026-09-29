@@ -568,3 +568,33 @@ def test_dropout_streak_is_not_inherited_from_an_earlier_state() -> None:
     cell.cnc.inject(CncFault.PART_SENSOR_FLICKER)  # drops out right as the cut begins
     _cut_for(cell, ctrl, 1.0)
     assert ctrl.state is S.MACHINING, ctrl.last_safe_reason
+
+
+# --- hardware door-zone interlock (safety relay + safety-rated door switch) ---
+
+
+def test_interlock_blocks_entry_when_door_jammed_and_sensor_stuck_open() -> None:
+    """Hypothesis found it: door jammed half-way + open sensor stuck on 1.1 s into the
+    stroke fools every software check. The hardware interlock must stop the arm."""
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    cell.cnc.inject(CncFault.DOOR_STUCK)
+    assert ctrl.start_cycle(PROGRAM)
+    run_one_cycle_until(cell, ctrl, S.OPEN_DOOR_LOAD)
+    ctrl.step()  # open command
+    _cut_for(cell, ctrl, 1.1)
+    cell.cnc.inject(CncFault.DOOR_SENSORS_STUCK_OPEN)
+    run_one_cycle_until(cell, ctrl, S.CLAMP)
+    assert ctrl.state is S.SAFE
+    assert cell.violations == []
+    assert cell.interlock_blocks >= 1
+
+
+def test_interlock_fault_reported_by_the_safety_relay_goes_safe() -> None:
+    from cell.drivers.sim.safety import SafetyFault
+
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    cell.safety.inject(SafetyFault.ZONE_INTERLOCK_FAULT)
+    ctrl.step()
+    assert ctrl.state is S.SAFE and "door zone interlock" in ctrl.last_safe_reason

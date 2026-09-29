@@ -6,6 +6,11 @@ from typing import Any
 
 import pytest
 import yaml
+from hypothesis import settings
+
+# Mutation runs: no example database (one mutant's failure must not replay against the
+# next) and derandomized, so every mutant faces the same examples.
+settings.register_profile("mutation", database=None, derandomize=True)
 
 SIM_CELL = Path(__file__).resolve().parent.parent / "cells" / "sim-01.yaml"
 

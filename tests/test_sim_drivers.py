@@ -176,7 +176,7 @@ def test_guard_open_trips(cell: SimCell) -> None:
 
 def test_safety_interface_is_read_only() -> None:
     public = {n for n in dir(SafetyInputs) if not n.startswith("_")}
-    assert public == {"estop_ok", "guard_closed"}
+    assert public == {"estop_ok", "guard_closed", "zone_interlock_ok"}
 
 
 # --- sensors ---
@@ -231,6 +231,7 @@ def test_stale_and_dead_sensors(cell: SimCell) -> None:
 
 
 def test_sim_flags_arm_entering_closed_machine(cell: SimCell) -> None:
+    cell = build_sim_cell(cell.cfg, zone_interlock=False)  # software alone
     cell.robot.move_to("above_fixture")
     assert any("door not open" in v for v in cell.violations)
 
@@ -483,3 +484,17 @@ def test_tug_test_reports_whether_the_clamp_holds(clamped: bool, expect: str) ->
     assert cell.robot.status() is RobotStatus.IDLE  # a tug never latches the robot
     assert cell.robot.at_pose() == ("load" if expect == "resisted" else fb.tug_pose)
     assert cell.violations == []
+
+
+def test_interlock_blocks_zone_entry_unless_door_physically_open(cell: SimCell) -> None:
+    cell.cnc.inject(CncFault.DOOR_SENSORS_STUCK_OPEN)  # sensors lie: door reads open
+    cell.robot.move_to("above_fixture")  # door is physically closed
+    assert cell.robot.status() is RobotStatus.STOPPED
+    assert cell.interlock_blocks == 1 and cell.violations == []
+
+
+def test_interlock_off_lets_software_bugs_show(cell: SimCell) -> None:
+    raw = cell.cfg
+    soft = build_sim_cell(raw, zone_interlock=False)
+    soft.robot.move_to("above_fixture")
+    assert any("door not open" in v for v in soft.violations)

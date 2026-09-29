@@ -76,6 +76,23 @@ class ProgramConfig(_Strict):
     tool: str  # the tool (or tool set) this program cuts with; watchman references key on it
 
 
+class SafetyConfig(_Strict):
+    """Hardware safety fitted to this cell. VERIFY ON HARDWARE."""
+
+    # A safety-rated, dual-channel door-open switch (e.g. coded magnetic) on the machine
+    # door, wired into the cell's safety relay, which blocks robot motion into the
+    # machine zone unless the door is physically fully open. Required: door sensors read
+    # by software can't catch a jammed door plus a stuck-on open sensor.
+    door_zone_interlock: StrictBool
+
+    @field_validator("door_zone_interlock")
+    @classmethod
+    def _must_be_fitted(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError("door_zone_interlock must be fitted (see CLAUDE.md safety rules)")
+        return v
+
+
 class RobotConfig(_Strict):
     kind: Literal["cobot6", "gantry"]
 
@@ -142,6 +159,7 @@ class Pins(_Strict):
     alarm_in: str
     estop_ok_in: str
     guard_closed_in: str
+    zone_interlock_ok_in: str  # safety relay monitoring contact for the door-zone interlock
 
 
 class WatchmanConfig(_Strict):
@@ -186,6 +204,7 @@ class WatchmanConfig(_Strict):
 class CellConfig(_Strict):
     cell_id: str
     machine: MachineConfig
+    safety: SafetyConfig
     robot: RobotConfig
     poses: dict[str, Pose]
     machine_zone_poses: frozenset[str]

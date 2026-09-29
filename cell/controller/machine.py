@@ -594,6 +594,8 @@ class CellController:
             raise _GoSafe("e-stop")
         if not self._safety.guard_closed():
             raise _GoSafe("guard open")
+        if not self._safety.zone_interlock_ok():
+            raise _GoSafe("door zone interlock fault (safety relay)")
         if c.cnc.alarm():
             raise _GoSafe("CNC alarm")
         status = c.robot.status()

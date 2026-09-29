@@ -1,6 +1,10 @@
 """Prove the unsafe-event log (the watchdog) catches broken controller logic, and
 stays empty for the real controller under random faults.
 
+These tests exercise the SOFTWARE layer on its own: cells are built without the
+hardware door-zone interlock (zone_interlock=False) so hardware can't mask a software
+bug. The random fault test at the end runs the real combination (software + interlock).
+
 Broken logic is made by swapping entries in the controller's STATE_TABLE (via
 monkeypatch, test-only) to remove a guard or a wait. There is no switch in the
 controller itself to turn a check off.
@@ -244,7 +248,7 @@ def _run_cycle(
 
 @pytest.mark.parametrize("case", BROKEN.values(), ids=BROKEN.keys())
 def test_watchdog_catches_broken_controller(case: Broken, monkeypatch: pytest.MonkeyPatch) -> None:
-    cell = new_cell(case.no_release_sensor)
+    cell = new_cell(case.no_release_sensor, zone_interlock=False)  # software layer alone
     ctrl, _ = make_controller(cell)
     case.mutate(monkeypatch, ctrl)
     _run_cycle(cell, ctrl, case.faults, case.at_state)
@@ -253,7 +257,7 @@ def test_watchdog_catches_broken_controller(case: Broken, monkeypatch: pytest.Mo
 
 @pytest.mark.parametrize("case", BROKEN.values(), ids=BROKEN.keys())
 def test_same_faults_with_real_controller_are_safe(case: Broken) -> None:
-    cell = new_cell(case.no_release_sensor)
+    cell = new_cell(case.no_release_sensor, zone_interlock=False)  # software layer alone
     ctrl, _ = make_controller(cell)
     _run_cycle(cell, ctrl, case.faults, case.at_state)
     assert cell.violations == []
@@ -318,3 +322,22 @@ def test_inside_guard_catches_door_closing_when_plausibility_is_off(
     _run_cycle(cell, ctrl, (), (S.LOAD, CncFault.DOOR_CLOSES_UNCOMMANDED))
     assert cell.violations == []
     assert "guard arm_may_be_inside" in ctrl.last_safe_reason
+
+
+@settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    schedule=fault_schedules(max_faults=1),
+    no_release_sensor=st.booleans(),
+    seed=st.integers(min_value=0, max_value=2**16),
+)
+def test_software_alone_survives_every_single_fault(
+    schedule: list[FaultEvent], no_release_sensor: bool, seed: int
+) -> None:
+    """Without the hardware interlock, the software must still handle any ONE fault.
+    (The jammed-door + stuck-on-sensor double fault is what the interlock is for.)"""
+    cell = new_cell(no_release_sensor, seed=seed, zone_interlock=False)
+    system = make_system(cell)
+    runner = ControllerRunner(system.ctrl, system.watchman)
+    run_with_faults(cell, runner.step, schedule)
+    assert cell.violations == [], (schedule, cell.violations)
+    assert runner.done or runner.stopped

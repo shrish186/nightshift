@@ -7,6 +7,10 @@ machine:
   controller: sim
   clamp_released_sensor: true
 
+# Hardware safety fitted to this cell (VERIFY ON HARDWARE).
+safety:
+  door_zone_interlock: true  # safety-rated door switch -> safety relay blocks zone entry
+
 robot:
   kind: cobot6
 
@@ -72,6 +76,7 @@ pins:
   alarm_in: "X0.3"
   estop_ok_in: "X1.0"
   guard_closed_in: "X1.1"
+  zone_interlock_ok_in: "X1.2"  # safety relay monitoring contact
 
 # Watchman thresholds. ASSUMPTION / VERIFY ON HARDWARE: tune from M1 data.
 watchman:

@@ -205,3 +205,10 @@ def test_part_present_ignore_window_bounds(sim_cell_raw: dict[str, Any], value: 
     raw["io_plausibility"]["part_present_max_ignore_s"] = value
     with pytest.raises(ValidationError):
         CellConfig.model_validate(raw)
+
+
+def test_door_zone_interlock_must_be_fitted(sim_cell_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    raw["safety"]["door_zone_interlock"] = False
+    with pytest.raises(ValidationError, match="door_zone_interlock"):
+        CellConfig.model_validate(raw)

@@ -43,6 +43,9 @@ class SimRobot:
         # Wired by SimCell: called as (origin, target, force_limit_n) when a move starts,
         # to record unsafe moves.
         self.on_move_start: Callable[[str, str, float | None], None] | None = None
+        # Wired by SimCell: the hardware safety relay's permission for a move (origin,
+        # target). A refused move is a protective stop by the robot's safety controller.
+        self.hardware_permit: Callable[[str, str], bool] = lambda origin, target: True
         # Wired by SimCell: resistance in newtons felt on a move leaving `origin`.
         self.resistance_n: Callable[[str | None], float] = lambda origin: 0.0
 
@@ -95,6 +98,10 @@ class SimRobot:
         if self._tug in ("resisted", "free") and self._status is RobotStatus.IDLE:
             self._tug = None  # a new move clears the previous tug result
         if self._status is not RobotStatus.IDLE or self._pose is None:
+            return
+        if not self.hardware_permit(self._pose, pose):
+            self._status = RobotStatus.STOPPED
+            self._tug = None
             return
         if self.on_move_start is not None:
             self.on_move_start(self._pose, pose, force_limit_n)

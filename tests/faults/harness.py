@@ -24,6 +24,7 @@ from cell.drivers.sim.cell import SimCell, build_sim_cell
 from cell.drivers.sim.cnc import CncFault
 from cell.drivers.sim.gripper import GripperFault
 from cell.drivers.sim.robot import RobotFault
+from cell.drivers.sim.safety import SafetyFault
 from cell.drivers.sim.sensors import SensorFault
 from cell.watchman.reference import Reference, ReferenceStore
 from cell.watchman.watchman import ALERT_STATE, Watchman
@@ -40,8 +41,15 @@ class HumanAction(Enum):
     GUARD_OPEN = "guard_open"
 
 
-Fault = CncFault | RobotFault | GripperFault | SensorFault | HumanAction
-ALL_FAULTS: list[Fault] = [*CncFault, *RobotFault, *GripperFault, *SensorFault, *HumanAction]
+Fault = CncFault | RobotFault | GripperFault | SensorFault | SafetyFault | HumanAction
+ALL_FAULTS: list[Fault] = [
+    *CncFault,
+    *RobotFault,
+    *GripperFault,
+    *SensorFault,
+    *SafetyFault,
+    *HumanAction,
+]
 
 
 @dataclass(frozen=True)
@@ -70,6 +78,8 @@ def inject(cell: SimCell, fault: Fault) -> None:
         cell.gripper.inject(fault)
     elif isinstance(fault, SensorFault):
         cell.sensors.inject(fault)
+    elif isinstance(fault, SafetyFault):
+        cell.safety.inject(fault)
     elif fault is HumanAction.ESTOP:
         cell.safety.press_estop()
     elif fault is HumanAction.GUARD_OPEN:
@@ -93,8 +103,19 @@ def make_cfg(no_release_sensor: bool = False, cycle_s: float = CYCLE_S) -> CellC
     return CellConfig.model_validate(raw)
 
 
-def new_cell(no_release_sensor: bool = False, seed: int = 0, cycle_s: float = CYCLE_S) -> SimCell:
-    return build_sim_cell(make_cfg(no_release_sensor, cycle_s), seed=seed, cycle_s=cycle_s)
+def new_cell(
+    no_release_sensor: bool = False,
+    seed: int = 0,
+    cycle_s: float = CYCLE_S,
+    zone_interlock: bool | None = None,
+) -> SimCell:
+    """zone_interlock=False: the software alone, without the hardware door-zone interlock."""
+    return build_sim_cell(
+        make_cfg(no_release_sensor, cycle_s),
+        seed=seed,
+        cycle_s=cycle_s,
+        zone_interlock=zone_interlock,
+    )
 
 
 class Runner(Protocol):

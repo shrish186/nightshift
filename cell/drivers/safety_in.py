@@ -25,3 +25,10 @@ class SafetyInputs(Protocol):
 
     def guard_closed(self) -> bool:
         """True only when all guard doors/light curtains report closed/clear."""
+
+    def zone_interlock_ok(self) -> bool:
+        """True only when the safety relay reports the door-zone interlock healthy.
+
+        The interlock itself (safety-rated door switch -> safety relay -> robot safety
+        stop on entry to the machine zone) is hardware; this is its monitoring contact.
+        """

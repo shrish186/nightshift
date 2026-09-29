@@ -26,6 +26,7 @@ class SimCell:
     safety: SimSafety
     sensors: SimSensors
     robot_violations: list[str] = field(default_factory=list)
+    interlock_blocks: int = 0  # moves the hardware door-zone interlock refused
 
     @property
     def violations(self) -> list[str]:
@@ -40,6 +41,7 @@ def build_sim_cell(
     door_s: float | None = None,
     clamp_s: float | None = None,
     robot_speed_scale: float = 1.0,
+    zone_interlock: bool | None = None,
 ) -> SimCell:
     """Build a sim cell. Door/clamp stroke times default to the config's measured travel."""
     clock = SimClock()
@@ -109,6 +111,20 @@ def build_sim_cell(
     def resistance(origin: str | None) -> float:
         return CLAMP_HOLD_N if origin == "load" and holding_clamped_part() else 0.0
 
+    # Hardware door-zone interlock (safety relay): refuses any move into the machine zone
+    # unless the door is physically fully open and the interlock channel is healthy.
+    # zone_interlock=False models the software alone, for tests of the software layer.
+    fitted = cfg.safety.door_zone_interlock if zone_interlock is None else zone_interlock
+
+    def permit(origin: str, target: str) -> bool:
+        if not fitted or target not in zone:
+            return True
+        if cnc.door() == "open" and safety.zone_interlock_ok():
+            return True
+        cell.interlock_blocks += 1
+        return False
+
+    robot.hardware_permit = permit
     robot.on_move_start = check_move
     robot.resistance_n = resistance
 
