@@ -38,16 +38,33 @@ A retrofit cell parked next to an existing lathe or VMC:
 
 ## 3. Business model
 
-**Rental, billed per extra machine-hour** the cell produces (hours the machine would otherwise have been idle).
+**Decided (2026-09-29): rental.**
+- **Monthly base fee** + **fee per extra machine-hour** the cell produces.
+- **12-month minimum** term.
+- **2–3 month deposit** up front (refundable at end of term, minus damage).
 
-Rough unit economics — **all [verify]** in customer interviews:
-- Shop's own machine-hour rate: ₹400–900/hr for VMC, ₹250–600/hr for CNC lathe.
-- We charge: ~₹100–200 per extra hour (a share of value, not of cost).
-- Target utilisation: 8 extra hrs/night × 25 nights = 200 hrs/month → ₹20k–40k/month per cell.
-- Cell BOM target: ₹6–10 lakh (Chinese cobot ₹3–6 lakh, gripper, trays, guarding, edge box, sensors).
-- Payback on our capex: ~18–30 months at those numbers. This is the key number to de-risk; it depends almost entirely on **how many nights the cell actually runs**.
+Pricing to test in interviews (**all [verify]**):
+- Shop's own machine-hour rate: ₹400–900/hr (VMC), ₹250–600/hr (CNC lathe).
+- Base fee: ~₹15–25k/month. Per-hour fee: ~₹60–120 per extra hour.
+- At 150 extra hrs/month: ~₹24k–43k/month per cell.
+- Payback on a ₹9 lakh cell: ~21–37 months. **A 12-month minimum does not pay back the cell by itself.** We need renewals or redeploying the cell to another customer. Track renewal rate from the first pilot.
 
-Implication: we need a cheap cell, fast changeover between part families, and very high trust in the watchman.
+### Cell cost target: **under ₹10 lakh all-in** (hardware + guarding + electronics + install)
+
+Cheap cobot cell vs. simple gantry loader. Ranges are placeholders until real quotes land in the cost tracker below.
+
+| Line item | Cobot cell (₹) | Gantry loader (₹) | Notes |
+|---|---|---|---|
+| Arm / gantry axes + drives | 3.5–6 L | 1.5–3.5 L | Cobot: low-cost 6-axis brands. Gantry: 2–3 axis linear modules + servos/steppers |
+| Gripper | 0.5–1.5 L | 0.5–1.5 L | Pneumatic parallel gripper; part-specific jaws |
+| Guarding (fence, doors, light curtain) | 0.8–1.5 L | 0.5–1.2 L | Gantry can often use a smaller enclosure |
+| Safety relay + e-stops + interlocks | 0.3–0.6 L | 0.3–0.6 L | Certified relay (see CLAUDE.md) |
+| Edge computer + watchman sensors + I/O | 0.3–0.6 L | 0.3–0.6 L | CT clamp, accelerometer, mic, I/O module |
+| Trays / fixtures | 0.3–1 L | 0.3–1 L | Per part family |
+| Install + commissioning (India) | 0.5–1 L | 0.7–1.5 L | Gantry needs more custom mechanical work on site |
+| **Total** | **~6.2–12.2 L** | **~4.1–9.9 L** | **[verify]** |
+
+**Trade-off:** the gantry is cheaper and simpler but more custom per machine, and weaker at reorienting parts or reaching awkward chucks. The cobot is more flexible and faster to redeploy, and that matters for a rental fleet that moves between customers. The software supports both: the controller only uses named poses (see `cell/drivers/robot.py`).
 
 ## 4. Milestones  ← current milestone lives here
 
@@ -91,18 +108,35 @@ nightshift/
 7. **Indian labor is cheap** (operators ~₹15–25k/month **[verify]**). The arm must win on more than wage savings: attrition/absenteeism, consistency, running hours people won't work, and watchman-backed safety. Validate this with every pilot factory.
 8. **Hardware fundraising** — investors will want pilot data and a working bench cell before a real check; plan the raise around M2.
 
-## 7. Open questions (answer through customer interviews)
+## 7. Cost tracker
+
+Fill in real quotes as they arrive. Never delete old rows; add a new row when a price changes.
+
+| Item | Option | Vendor | Quote (₹) | Source (link / person) | Date | Notes |
+|---|---|---|---|---|---|---|
+| Cobot arm | | | | | | |
+| Cobot arm | | | | | | |
+| Gantry axes + drives | | | | | | |
+| Gripper | | | | | | |
+| Guarding / light curtain | | | | | | |
+| Safety relay | | | | | | |
+| Edge computer | | | | | | |
+| CT clamp / accelerometer / mic | | | | | | |
+| Trays / fixtures | | | | | | |
+| Install (per cell) | | | | | | |
+
+## 8. Open questions (answer through customer interviews)
 
 - What % of their jobs are repeat batches of 50+ identical parts?
 - What machines/controllers do they have, and how old?
 - What actually goes wrong at night today when they try? (tool breakage, chips, coolant, power cuts?)
-- Would they pay per hour? What would they consider fair?
+- Would they accept base fee + per-hour + 12-month minimum + deposit? What feels fair?
 - Who gets called at 2am — owner, supervisor?
 - Power and internet reliability on the floor.
 
-## 8. Next 2 weeks
+## 9. Next 2 weeks
 
 - [ ] **Shrish:** 15 customer calls/visits via contacts in 2 clusters; fill section 7. Set up repo, CI, telemetry agent skeleton.
 - [ ] **CS:** driver interfaces + mocks, controller state machine with tests (M0).
-- [ ] **HW:** shortlist 3 cobots (price, payload, India support), sensor kit BOM for M1.
+- [ ] **HW:** get quotes for 3 cobots and 1 gantry option into the cost tracker (price, payload, India support); sensor kit BOM for M1.
 - [ ] **All:** pick the one friendly shop for M1.
