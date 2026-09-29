@@ -60,13 +60,13 @@ def test_clamp_sensor_short_faults_immediately(cell: SimCell) -> None:
     assert F.CLAMP_BOTH_ON in mon.check()
 
 
-def test_stuck_door_faults_just_after_travel_time_not_before(cell: SimCell) -> None:
+def test_stuck_door_faults_just_after_window_not_before(cell: SimCell) -> None:
     mon = _monitor(cell)
-    travel = cell.cfg.timeouts_s.door
+    window = cell.cfg.io_plausibility.door_plausibility_window_s
     cell.cnc.inject(CncFault.DOOR_STUCK)
     cell.cnc.open_door()
     assert mon.check() == []  # timer starts: both sensors off
-    cell.clock.advance(travel - 0.01)
+    cell.clock.advance(window - 0.01)
     assert mon.check() == []
     cell.clock.advance(0.02)
     assert F.DOOR_BOTH_OFF_TOO_LONG in mon.check()
@@ -78,7 +78,7 @@ def test_clamp_that_never_closes_is_plausible_but_not_clamped(cell: SimCell) -> 
     mon = _monitor(cell)
     cell.cnc.inject(CncFault.CLAMP_FAIL)
     cell.cnc.clamp()
-    assert _run(cell, mon, cell.cfg.timeouts_s.clamp + 1) == set()
+    assert _run(cell, mon, cell.cfg.io_plausibility.clamp_plausibility_window_s + 1) == set()
     assert not cell.cnc.clamped()
 
 
@@ -90,7 +90,7 @@ def test_clamp_stuck_mid_stroke_faults() -> None:
     cell.clock.advance(0.1)  # jaws moving: both clamp sensors off
     cell.cnc.inject(CncFault.CLAMP_JAM)
     assert mon.check() == []
-    cell.clock.advance(cfg.timeouts_s.clamp + 0.1)
+    cell.clock.advance(cfg.io_plausibility.clamp_plausibility_window_s + 0.1)
     assert F.CLAMP_BOTH_OFF_TOO_LONG in mon.check()
 
 
@@ -98,7 +98,7 @@ def test_io_power_loss_faults(cell: SimCell) -> None:
     mon = _monitor(cell)
     cell.cnc.inject(CncFault.IO_POWER_LOSS)
     assert mon.check() == []  # both off could still be travel...
-    cell.clock.advance(cell.cfg.timeouts_s.door + 0.1)
+    cell.clock.advance(cell.cfg.io_plausibility.door_plausibility_window_s + 0.1)
     faults = set(mon.check())
     assert {F.DOOR_BOTH_OFF_TOO_LONG, F.CLAMP_BOTH_OFF_TOO_LONG} <= faults
 
@@ -128,12 +128,12 @@ def test_clamp_pair_ignored_without_release_sensor(cfg: CellConfig) -> None:
 
 def test_timer_resets_when_a_sensor_comes_back(cell: SimCell) -> None:
     mon = _monitor(cell)
-    travel = cell.cfg.timeouts_s.door
+    window = cell.cfg.io_plausibility.door_plausibility_window_s
     cell.cnc.open_door()
     mon.check()
     cell.clock.advance(3)  # door arrives open (DOOR_S=2)
     assert mon.check() == []
     cell.cnc.close_door()
     mon.check()
-    cell.clock.advance(travel - 1)  # closing stroke done well within travel time
+    cell.clock.advance(window - 0.5)  # closing stroke (2 s) done well within the window
     assert mon.check() == []

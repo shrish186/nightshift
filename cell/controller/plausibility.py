@@ -1,7 +1,8 @@
 """Sensor-pair plausibility checks. SAFETY-RELEVANT: changes here need human review.
 
 A door or clamp with two sensors (open + closed, clamped + released) can never
-legitimately read both True, and can only read both False while it is travelling.
+legitimately read both True, and can only read both False while it is travelling
+(up to the configured io_plausibility window, which is measured travel + margin).
 Anything else means a shorted or broken sensor, a stuck mechanism or lost I/O power.
 The controller calls check() every step and goes to SAFE on any fault.
 
@@ -49,18 +50,18 @@ class IoPlausibilityMonitor:
     def __init__(self, cnc: CncIo, clock: Clock, cfg: CellConfig) -> None:
         self._cnc = cnc
         self._clock = clock
-        # Max travel time is the configured door/clamp timeout: nothing hardcoded.
+        p = cfg.io_plausibility
         self._door = _Pair(
             PlausibilityFault.DOOR_BOTH_ON,
             PlausibilityFault.DOOR_BOTH_OFF_TOO_LONG,
-            cfg.timeouts_s.door,
+            p.door_plausibility_window_s,
         )
         self._clamp: _Pair | None = None
         if cfg.machine.clamp_released_sensor:
             self._clamp = _Pair(
                 PlausibilityFault.CLAMP_BOTH_ON,
                 PlausibilityFault.CLAMP_BOTH_OFF_TOO_LONG,
-                cfg.timeouts_s.clamp,
+                p.clamp_plausibility_window_s,
             )
 
     def check(self) -> list[PlausibilityFault]:

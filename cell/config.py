@@ -75,6 +75,29 @@ class Timeouts(_Strict):
     door: float = Field(gt=0)
 
 
+class IoPlausibility(_Strict):
+    """Sensor-pair plausibility timing. ASSUMPTION / VERIFY ON HARDWARE.
+
+    *_travel_s must be the real stroke time *measured on this machine*. Each
+    *_plausibility_window_s is travel + margin: how long both sensors in a pair may
+    read off before it counts as a fault. Separate from timeouts_s.door/clamp, which
+    bound how long the controller waits for a commanded move.
+    """
+
+    door_travel_s: float = Field(gt=0)
+    door_plausibility_window_s: float = Field(gt=0)
+    clamp_travel_s: float = Field(gt=0)
+    clamp_plausibility_window_s: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _window_exceeds_travel(self) -> IoPlausibility:
+        if self.door_plausibility_window_s <= self.door_travel_s:
+            raise ValueError("door_plausibility_window_s must be > door_travel_s")
+        if self.clamp_plausibility_window_s <= self.clamp_travel_s:
+            raise ValueError("clamp_plausibility_window_s must be > clamp_travel_s")
+        return self
+
+
 class Pins(_Strict):
     door_open_out: str
     door_close_out: str
@@ -108,6 +131,7 @@ class CellConfig(_Strict):
     poses: dict[str, Pose]
     machine_zone_poses: frozenset[str]
     timeouts_s: Timeouts
+    io_plausibility: IoPlausibility
     pins: Pins
     watchman: WatchmanConfig
     # Required when machine.clamp_released_sensor is false, forbidden when true.

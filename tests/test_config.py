@@ -160,3 +160,22 @@ def test_fallback_pull_pose_must_exist(sim_cell_raw: dict[str, Any]) -> None:
     raw["unclamp_fallback"]["pull_pose"] = "nowhere"
     with pytest.raises(ValidationError, match="pull_pose"):
         CellConfig.model_validate(raw)
+
+
+@pytest.mark.parametrize("pair", ["door", "clamp"])
+@pytest.mark.parametrize("delta", [0.0, -0.1])
+def test_plausibility_window_must_exceed_travel(
+    sim_cell_raw: dict[str, Any], pair: str, delta: float
+) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    p = raw["io_plausibility"]
+    p[f"{pair}_plausibility_window_s"] = p[f"{pair}_travel_s"] + delta
+    with pytest.raises(ValidationError, match=f"{pair}_plausibility_window_s must be >"):
+        CellConfig.model_validate(raw)
+
+
+def test_plausibility_section_required(sim_cell_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    del raw["io_plausibility"]
+    with pytest.raises(ValidationError):
+        CellConfig.model_validate(raw)

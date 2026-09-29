@@ -37,8 +37,12 @@ class SimCnc:
         clock: Clock,
         cycle_s: float = DEFAULT_CYCLE_S,
         clamp_released_sensor: bool = True,
+        door_s: float = DOOR_S,
+        clamp_s: float = CLAMP_S,
     ) -> None:
         self._clock = clock
+        self._door_s = door_s
+        self._clamp_s = clamp_s
         self._cycle_s = cycle_s
         self._has_released_sensor = clamp_released_sensor
         self._door_target_open = False
@@ -100,7 +104,7 @@ class SimCnc:
         if self._door_frozen is not None:
             return
         self._door_target_open = to_open
-        self._door_done_at = self._clock.now() + DOOR_S
+        self._door_done_at = self._clock.now() + self._door_s
         if self._door_stick_next:
             self._door_frozen = "moving"
 
@@ -117,13 +121,13 @@ class SimCnc:
 
     def clamp(self) -> None:
         self._clamp_cmd = True
-        self._clamp_done_at = self._clock.now() + CLAMP_S
+        self._clamp_done_at = self._clock.now() + self._clamp_s
 
     def unclamp(self) -> None:
         if self.spindle_running():
             self._violation("unclamp during cycle")
         self._clamp_cmd = False
-        self._clamp_done_at = self._clock.now() + CLAMP_S
+        self._clamp_done_at = self._clock.now() + self._clamp_s
 
     def cycle_start(self) -> None:
         self._update()

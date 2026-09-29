@@ -38,6 +38,14 @@ timeouts_s:
   place_done: 20
   door: 8
 
+# Sensor-pair plausibility. ASSUMPTION / VERIFY ON HARDWARE: travel times must be
+# measured on the real machine; windows = measured travel + margin, and must exceed it.
+io_plausibility:
+  door_travel_s: 2.0
+  door_plausibility_window_s: 3.0
+  clamp_travel_s: 0.5
+  clamp_plausibility_window_s: 1.0
+
 # Logical signal -> physical pin/address on the CNC I/O or safety relay.
 pins:
   door_open_out: "Y0.0"

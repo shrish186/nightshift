@@ -8,7 +8,7 @@ from cell.clock import SimClock
 from cell.config import CellConfig
 from cell.drivers.sim.cnc import DEFAULT_CYCLE_S, SimCnc
 from cell.drivers.sim.gripper import SimGripper
-from cell.drivers.sim.robot import SimRobot
+from cell.drivers.sim.robot import SPEED_MM_S, SimRobot
 from cell.drivers.sim.safety import SimSafety
 from cell.drivers.sim.sensors import SimSensors
 
@@ -35,11 +35,25 @@ class SimCell:
         return [*self.robot_violations, *self.cnc.violations]
 
 
-def build_sim_cell(cfg: CellConfig, seed: int = 0, cycle_s: float = DEFAULT_CYCLE_S) -> SimCell:
+def build_sim_cell(
+    cfg: CellConfig,
+    seed: int = 0,
+    cycle_s: float = DEFAULT_CYCLE_S,
+    door_s: float | None = None,
+    clamp_s: float | None = None,
+    robot_speed_scale: float = 1.0,
+) -> SimCell:
+    """Build a sim cell. Door/clamp stroke times default to the config's measured travel."""
     clock = SimClock()
-    robot = SimRobot(clock, cfg.poses)
+    robot = SimRobot(clock, cfg.poses, speed_mm_s=SPEED_MM_S * robot_speed_scale)
     gripper = SimGripper(clock, part_at_tool=lambda: robot.at_pose() in GRIP_POSES)
-    cnc = SimCnc(clock, cycle_s=cycle_s, clamp_released_sensor=cfg.machine.clamp_released_sensor)
+    cnc = SimCnc(
+        clock,
+        cycle_s=cycle_s,
+        clamp_released_sensor=cfg.machine.clamp_released_sensor,
+        door_s=cfg.io_plausibility.door_travel_s if door_s is None else door_s,
+        clamp_s=cfg.io_plausibility.clamp_travel_s if clamp_s is None else clamp_s,
+    )
     safety = SimSafety()
     sensors = SimSensors(clock, cutting=cnc.spindle_cutting, seed=seed)
     cell = SimCell(cfg, clock, robot, gripper, cnc, safety, sensors)

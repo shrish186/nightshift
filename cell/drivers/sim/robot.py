@@ -22,8 +22,15 @@ class RobotFault(Enum):
 
 
 class SimRobot:
-    def __init__(self, clock: Clock, poses: dict[str, Pose], start_pose: str = "home") -> None:
+    def __init__(
+        self,
+        clock: Clock,
+        poses: dict[str, Pose],
+        start_pose: str = "home",
+        speed_mm_s: float = SPEED_MM_S,
+    ) -> None:
         self._clock = clock
+        self._speed = speed_mm_s
         self._poses = poses
         self._pose: str | None = start_pose
         self._origin: str | None = None
@@ -73,7 +80,7 @@ class SimRobot:
         dist = math.dist(self._poses[self._pose][:3], self._poses[pose][:3])
         self._origin, self._target = self._pose, pose
         self._pose = None
-        self._arrive_at = self._clock.now() + max(MIN_MOVE_S, dist / SPEED_MM_S)
+        self._arrive_at = self._clock.now() + max(MIN_MOVE_S, dist / self._speed)
         self._status = RobotStatus.MOVING
         self._update()  # a limited move into immediate resistance trips at once
 
