@@ -14,8 +14,10 @@ Levels are relative, not absolute, wherever possible:
   - tool break: vs. this cut's settled mean current (breaks mid-cut), and this cut's
     early window mean vs. the reference cycles (tool already broken when the cut starts)
   - chip buildup: recent window mean vs. this cut's early window mean
-  - tool wear: each cut's early window mean vs. the reference cycles' mean
-ASSUMPTION: the tool is good for the first `reference_cycles` cuts after start.
+  - tool wear: each cut's early window mean vs. the confirmed reference for this
+    program + tool (see reference.py; never learned automatically)
+Alert limits come from the reference's recorded spread when there is one, bounded by
+the config alert ratios; stop ratios are the fixed config values.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from enum import Enum
 
 from cell.config import WatchmanConfig
 from cell.drivers.sensors import SensorFrame
+from cell.watchman.reference import CycleStats, Reference
 
 _EPS = 1e-9
 _MIN_SETTLED_SAMPLES = 5
@@ -56,13 +59,23 @@ def _mean(xs: list[float] | deque[float]) -> float:
 
 
 class Detector:
-    def __init__(self, cfg: WatchmanConfig, start: float) -> None:
+    def __init__(
+        self, cfg: WatchmanConfig, start: float, reference: Reference | None = None
+    ) -> None:
         self._cfg = cfg
         self._start = start
         self._last_ts: float | None = None
         self._was_cutting = False
-        self._reference: list[float] = []
+        self.set_reference(reference)
+        self.last_cut: CycleStats | None = None  # stats of the most recent complete cut
+        self.cuts_completed = 0
         self._new_cut(start)
+
+    def set_reference(self, reference: Reference | None) -> None:
+        """The confirmed reference for the active program + tool, or None. Without one,
+        the reference-based checks (tool wear, tool broken before the cut) cannot run."""
+        self._ref = reference
+        self._limits = reference.limits(self._cfg) if reference is not None else None
 
     def _new_cut(self, now: float) -> None:
         self._cut_start = now
@@ -72,6 +85,7 @@ class Detector:
         self._over_since: float | None = None
         self._early: list[float] = []
         self._early_judged = False
+        self._chip_max = 1.0
         self._recent: deque[tuple[float, float]] = deque()
 
     def update(self, frame: SensorFrame | None, now: float, cutting: bool) -> list[Finding]:
@@ -143,8 +157,8 @@ class Detector:
         elif not self._early_judged:
             # --- TOOL_BREAK before the cut: early level vs. the good-tool reference ---
             self._early_judged = True
-            if self._early and len(self._reference) >= c.reference_cycles:
-                ratio = _mean(self._early) / _mean(self._reference)
+            if self._early and self._ref is not None:
+                ratio = _mean(self._early) / self._ref.level_mean
                 if ratio < c.tool_break_current_ratio:
                     out.append(
                         Finding(
@@ -158,33 +172,33 @@ class Detector:
             self._recent.popleft()
         if now >= settled_at + 2 * c.chip_window_s - _EPS and self._early:
             ratio = _mean([x for _, x in self._recent]) / _mean(self._early)
+            self._chip_max = max(self._chip_max, ratio)
+            chip_alert = self._limits.chip_alert if self._limits else c.chip_alert_ratio
             if ratio >= c.chip_stop_ratio:
                 out.append(
                     Finding(FindingKind.CHIP_BUILDUP, Severity.STOP, f"load x{ratio:.2f} in cut")
                 )
-            elif ratio >= c.chip_alert_ratio:
+            elif ratio >= chip_alert:
                 out.append(
                     Finding(FindingKind.CHIP_BUILDUP, Severity.ALERT, f"load x{ratio:.2f} in cut")
                 )
         return out
 
     def _end_of_cut(self) -> list[Finding]:
-        """TOOL_WEAR: this cut's early-window level vs. the reference cuts."""
+        """Record this cut's stats; TOOL_WEAR: its early level vs. the reference."""
         c = self._cfg
         complete = self._cut_start + c.cut_settle_s + c.chip_window_s
         if not self._early or self._last_ts is None or self._last_ts < complete:
             return []  # cut too short to judge
         level = _mean(self._early)
-        if len(self._reference) < c.reference_cycles:
-            self._reference.append(level)
+        self.last_cut = CycleStats(level, self._chip_max)
+        self.cuts_completed += 1
+        if self._ref is None or self._limits is None:
             return []
-        ratio = level / _mean(self._reference)
+        ratio = level / self._ref.level_mean
+        detail = f"load x{ratio:.2f} vs reference"
         if ratio >= c.wear_stop_ratio:
-            return [
-                Finding(FindingKind.TOOL_WEAR, Severity.STOP, f"load x{ratio:.2f} vs reference")
-            ]
-        if ratio >= c.wear_alert_ratio:
-            return [
-                Finding(FindingKind.TOOL_WEAR, Severity.ALERT, f"load x{ratio:.2f} vs reference")
-            ]
+            return [Finding(FindingKind.TOOL_WEAR, Severity.STOP, detail)]
+        if ratio >= self._limits.wear_alert:
+            return [Finding(FindingKind.TOOL_WEAR, Severity.ALERT, detail)]
         return []

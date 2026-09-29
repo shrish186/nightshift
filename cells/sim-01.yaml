@@ -87,7 +87,13 @@ watchman:
   chip_window_s: 2.0
   chip_alert_ratio: 1.2
   chip_stop_ratio: 1.5
-  # Tool wear (across cycles): a cycle's mean cutting current / the reference cycles' mean.
+  # Tool wear (across cycles): a cycle's early load / the reference's mean. The alert
+  # ratios below are outer bounds; per-program limits derive from the reference spread.
   wear_alert_ratio: 1.25
   wear_stop_ratio: 1.5
-  reference_cycles: 1
+  # References: recorded per program + tool under supervision (fresh tool confirmed,
+  # reference_cycles cycles confirmed clean). Alert limits derive from their spread.
+  reference_cycles: 5
+  derived_limit_sigmas: 4.0
+  derived_min_margin: 0.12
+  reference_store: data/references/sim-01.json

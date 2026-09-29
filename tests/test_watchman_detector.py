@@ -10,9 +10,11 @@ import pytest
 from cell.config import WatchmanConfig, load_cell_config
 from cell.drivers.sensors import SensorFrame
 from cell.watchman.detector import Detector, Finding, FindingKind, Severity
+from cell.watchman.reference import CycleStats, Reference
 from tests.conftest import SIM_CELL
 
 K, SEV = FindingKind, Severity
+PROG = "P1"
 DT = 0.1
 CUT_A = 12.0
 
@@ -25,8 +27,10 @@ def wcfg() -> WatchmanConfig:
 class Feed:
     """Drives a Detector with synthetic frames and collects every finding."""
 
-    def __init__(self, cfg: WatchmanConfig, seed: int = 0) -> None:
-        self.det = Detector(cfg, start=0.0)
+    def __init__(
+        self, cfg: WatchmanConfig, seed: int = 0, reference: Reference | None = None
+    ) -> None:
+        self.det = Detector(cfg, start=0.0, reference=reference)
         self.t = 0.0
         self.rng = random.Random(seed)
         self.findings: list[Finding] = []
@@ -175,15 +179,30 @@ def _constant(amps: float) -> Callable[[float], float]:
     return lambda t: amps
 
 
-def _wear(wcfg: WatchmanConfig, ratios: list[float]) -> list[list[Finding]]:
-    f = Feed(wcfg, seed=2)
+def ref(levels: list[float], chips: list[float] | None = None) -> Reference:
+    """A confirmed reference with the given per-cycle levels (amps) and chip maxima."""
+    chips = chips or [1.0] * len(levels)
+    return Reference(
+        PROG, "T1", "op", True, "2026-09-29T00:00:00+00:00",
+        tuple(CycleStats(lv, ch) for lv, ch in zip(levels, chips, strict=True)),
+    )  # fmt: skip
+
+
+# Wide spread, so the derived limits are capped at the config ratios.
+WIDE = ref([CUT_A * 0.9, CUT_A, CUT_A * 1.1, CUT_A * 0.95, CUT_A * 1.05])
+
+
+def _wear(
+    wcfg: WatchmanConfig, ratios: list[float], reference: Reference = WIDE
+) -> list[list[Finding]]:
+    f = Feed(wcfg, seed=2, reference=reference)
     per_cycle = []
-    for r in [1.0, *ratios]:  # first cycle is the reference
+    for r in ratios:
         f.idle()
         found = f.run(8, current=_constant(CUT_A * r))
         found += f.idle(0.5)  # wear is judged when the cycle ends
         per_cycle.append(found)
-    return per_cycle[1:]
+    return per_cycle
 
 
 def test_wear_below_alert_is_quiet(wcfg: WatchmanConfig) -> None:
@@ -210,7 +229,51 @@ def test_tool_broken_before_the_cut_starts_stops(wcfg: WatchmanConfig) -> None:
     assert (K.TOOL_BREAK, SEV.STOP) in kinds(c2)
 
 
-def test_broken_tool_before_reference_is_learned_is_not_judged(wcfg: WatchmanConfig) -> None:
+def test_without_a_reference_nothing_is_learned_or_judged(wcfg: WatchmanConfig) -> None:
     f = Feed(wcfg)
+    for _ in range(5):  # clean cycles: never become a reference by themselves
+        f.idle()
+        f.run(8)
     f.idle()
-    assert f.run(8, current=_constant(CUT_A * 0.25)) == []  # nothing to compare against yet
+    assert f.run(8, current=_constant(CUT_A * 0.25)) + f.idle() == []  # nothing to compare
+    assert f.run(8, current=_constant(CUT_A * 1.6)) + f.idle() == []
+
+
+# --- limits derived from the reference spread ---
+
+
+def test_tight_reference_gives_tighter_wear_limit_than_config(wcfg: WatchmanConfig) -> None:
+    tight = ref([CUT_A * x for x in (0.99, 1.0, 1.01, 1.0, 1.0)])
+    limits = tight.limits(wcfg)
+    assert limits.wear_alert < wcfg.wear_alert_ratio
+    assert limits.wear_alert >= 1 + wcfg.derived_min_margin
+    # a 1.18x drift: the fixed 1.25 ratio misses it, the derived limit catches it
+    assert _wear(wcfg, [1.18], reference=WIDE) == [[]]
+    (c,) = _wear(wcfg, [1.18], reference=tight)
+    assert kinds(c) == {(K.TOOL_WEAR, SEV.ALERT)}
+
+
+def test_noisy_reference_is_capped_at_config_ratio(wcfg: WatchmanConfig) -> None:
+    noisy = ref([CUT_A * x for x in (0.7, 1.3, 0.8, 1.2, 1.0)], [1.0, 1.4, 1.0, 1.3, 1.1])
+    limits = noisy.limits(wcfg)
+    assert limits.wear_alert == wcfg.wear_alert_ratio
+    assert limits.chip_alert == wcfg.chip_alert_ratio
+
+
+def test_zero_spread_still_keeps_the_minimum_margin(wcfg: WatchmanConfig) -> None:
+    flat = ref([CUT_A] * 5)
+    limits = flat.limits(wcfg)
+    assert limits.wear_alert == pytest.approx(1 + wcfg.derived_min_margin)
+    assert limits.chip_alert == pytest.approx(1 + wcfg.derived_min_margin)
+
+
+def test_tight_reference_gives_tighter_chip_limit(wcfg: WatchmanConfig) -> None:
+    tight = ref([CUT_A] * 5, [1.0, 1.01, 1.0, 1.02, 1.0])
+    assert tight.limits(wcfg).chip_alert < wcfg.chip_alert_ratio
+    f = Feed(wcfg, seed=1, reference=tight)
+    f.idle()
+
+    def drift(t: float) -> float:  # ends near 1.17x: under the 1.2 config alert
+        return CUT_A * (1 + 0.17 * max(0.0, t - wcfg.cut_settle_s) / 11)
+
+    assert (K.CHIP_BUILDUP, SEV.ALERT) in kinds(f.run(12, current=drift))

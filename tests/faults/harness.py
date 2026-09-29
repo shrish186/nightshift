@@ -25,6 +25,7 @@ from cell.drivers.sim.cnc import CncFault
 from cell.drivers.sim.gripper import GripperFault
 from cell.drivers.sim.robot import RobotFault
 from cell.drivers.sim.sensors import SensorFault
+from cell.watchman.reference import Reference, ReferenceStore
 from cell.watchman.watchman import ALERT_STATE, Watchman
 from tests.conftest import SIM_CELL
 
@@ -132,10 +133,43 @@ class System:
         return [a for a in self.alerter.alerts if a.state != ALERT_STATE]
 
 
-def make_system(cell: SimCell) -> System:
+OPERATOR = "test-operator"
+_REFERENCES: dict[tuple[bool, float], Reference] = {}
+
+
+def recorded_reference(no_release_sensor: bool, cycle_s: float) -> Reference:
+    """A reference recorded the real way (supervised run, fresh tool confirmed, each
+    cycle confirmed clean) on a fresh sim cell. Recorded once per variant and cached."""
+    key = (no_release_sensor, round(cycle_s, 3))
+    if key not in _REFERENCES:
+        cell = new_cell(no_release_sensor, seed=4242, cycle_s=cycle_s)
+        system = make_system(cell, with_reference=False)
+        w = system.watchman
+        assert w.begin_reference(PROGRAM, OPERATOR, fresh_tool_confirmed=True) is None
+        while w.recording_progress is not None:
+            runner = ControllerRunner(system.ctrl, w, supervised=True)
+            run_with_faults(cell, runner.step)
+            assert runner.done, system.ctrl.last_safe_reason
+            assert w.confirm_cycle_clean(OPERATOR) is None
+        ref = w.reference_for(PROGRAM)
+        assert ref is not None
+        _REFERENCES[key] = ref
+    return _REFERENCES[key]
+
+
+def make_system(cell: SimCell, with_reference: bool = True) -> System:
+    """Controller + watchman. with_reference preloads a supervised-recorded reference for
+    the test program, so unattended cycles are allowed."""
     ctrl, alerter = make_controller(cell)
-    watchman = Watchman(cell.cfg, cell.clock, cell.sensors, cell.cnc, ctrl.request_safe, alerter)
+    store = ReferenceStore(None)
+    if with_reference:
+        no_release = not cell.cfg.machine.clamp_released_sensor
+        store.put(recorded_reference(no_release, cell.cfg.programs[PROGRAM].expected_cycle_s))
+    watchman = Watchman(
+        cell.cfg, cell.clock, cell.sensors, cell.cnc, ctrl.request_safe, alerter, store
+    )
     ctrl.reset_checks.append(watchman.health)
+    ctrl.start_checks.append(watchman.prepare)
     return System(ctrl, watchman, alerter)
 
 
@@ -151,12 +185,16 @@ class ControllerRunner:
     """
 
     def __init__(
-        self, ctrl: CellController, watchman: Watchman | None = None, program: str = PROGRAM
+        self,
+        ctrl: CellController,
+        watchman: Watchman | None = None,
+        program: str = PROGRAM,
+        supervised: bool = False,
     ) -> None:
         self.ctrl = ctrl
         self.watchman = watchman
         self._start = ctrl.cycles_completed
-        ctrl.start_cycle(program)
+        self.started = ctrl.start_cycle(program, supervised)
 
     @property
     def done(self) -> bool:
@@ -164,11 +202,11 @@ class ControllerRunner:
 
     @property
     def stopped(self) -> bool:
-        return self.ctrl.state is State.SAFE
+        return self.ctrl.state is State.SAFE or not self.started
 
     @property
     def stop_reason(self) -> str:
-        return self.ctrl.last_safe_reason
+        return self.ctrl.last_safe_reason if self.started else self.ctrl.last_start_refusal
 
     def step(self) -> bool:
         if self.watchman is not None:

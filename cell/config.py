@@ -152,8 +152,14 @@ class WatchmanConfig(_Strict):
     chip_stop_ratio: float = Field(gt=1)
     wear_alert_ratio: float = Field(gt=1)
     wear_stop_ratio: float = Field(gt=1)
-    # ASSUMPTION: the tool is good for the first reference_cycles after the watchman starts.
-    reference_cycles: int = Field(ge=1)
+    # References are recorded per program + tool in a supervised run: an operator
+    # confirms a fresh tool, then confirms reference_cycles cycles clean. Never auto-learned.
+    reference_cycles: int = Field(ge=3)
+    # Alert limits from the reference spread: mean + derived_limit_sigmas x sd, at least
+    # derived_min_margin above the mean; never looser than the *_alert_ratio above.
+    derived_limit_sigmas: float = Field(gt=0)
+    derived_min_margin: float = Field(gt=0)
+    reference_store: str  # JSON file of recorded references (under data/, not in git)
 
     @model_validator(mode="after")
     def _stop_above_alert(self) -> WatchmanConfig:

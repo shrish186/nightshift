@@ -385,6 +385,11 @@ class CellController:
         # Extra checks reset() must pass, e.g. the watchman's health. Each returns None
         # when OK, or why a reset must be refused.
         self.reset_checks: list[Callable[[], str | None]] = []
+        # Checks start_cycle() must pass, given (program, supervised); e.g. the watchman
+        # refusing an unattended run with no confirmed reference.
+        self.start_checks: list[Callable[[str, bool], str | None]] = []
+        self.supervised = False
+        self.last_start_refusal = ""
         self._start_requested = False
         self.program: str | None = None  # active CNC program, set by start_cycle()
         self._safe_requested: str | None = None
@@ -395,17 +400,24 @@ class CellController:
         self._step_started_at = 0.0
 
     # --- public API ---
-    def start_cycle(self, program: str) -> bool:
-        """Request one cycle of a configured CNC program. Only accepted in IDLE."""
+    def start_cycle(self, program: str, supervised: bool = False) -> bool:
+        """Request one cycle of a configured CNC program. Only accepted in IDLE.
+
+        supervised=True means a person is watching this cycle (e.g. while recording a
+        watchman reference). Unattended cycles must pass every start check."""
         if self.state is not State.IDLE or self._start_requested:
             return False
-        if program not in self._cfg.programs:
+        refusal = None if program in self._cfg.programs else f"unknown program {program!r}"
+        for check in self.start_checks:
+            refusal = refusal or check(program, supervised)
+        if refusal is not None:
+            self.last_start_refusal = refusal
             log.info(
                 "start refused",
                 extra={
                     "fields": {
                         "event": "start_refused",
-                        "reason": f"unknown program {program!r}",
+                        "reason": refusal,
                         "ts": self._clock.now(),
                         "cell_id": self._cfg.cell_id,
                     }
@@ -413,6 +425,7 @@ class CellController:
             )
             return False
         self.program = program
+        self.supervised = supervised
         self._start_requested = True
         return True
 
