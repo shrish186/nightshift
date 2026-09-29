@@ -37,6 +37,10 @@ class _Server:
                 reply: Any = {"accepted": [e["id"] for e in body["events"]]}
                 if srv.mode == "garbage":
                     reply = {"nope": 1}
+                if srv.mode == "wrong_type":
+                    reply = {"accepted": "e0"}  # a string, not a list of ids
+                if srv.mode == "numbers":
+                    reply = {"accepted": [0, 1]}
                 data = json.dumps(reply).encode()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(data)))
@@ -66,7 +70,7 @@ def test_upload_returns_confirmed_ids_and_sends_token(server: _Server) -> None:
     assert server.requests[0]["body"]["events"][1]["payload"] == {"i": 1}
 
 
-@pytest.mark.parametrize("mode", ["500", "garbage"])
+@pytest.mark.parametrize("mode", ["500", "garbage", "wrong_type", "numbers"])
 def test_bad_replies_are_retryable_errors(server: _Server, mode: str) -> None:
     server.mode = mode
     with pytest.raises(UploadError):
