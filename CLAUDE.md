@@ -16,6 +16,7 @@ A retrofit robot cell that loads/unloads existing CNC lathes and VMCs overnight 
 
 ## Safety rules (non-negotiable)
 - Physical safety is hardware: guarding, e-stops, interlocks. Software never overrides, bypasses, or simulates away a hardware safety signal.
+- On real hardware, e-stop and guard circuits go through a certified safety relay. Python and the edge computer are never part of the safety circuit.
 - Never remove, weaken, or "simplify" a safety check, timeout, or interlock read, even to make a test pass. If a test fails because of a safety check, the test or the logic above it is wrong.
 - Any unknown or unexpected state → go to SAFE (robot stopped at a safe pose, CNC feed hold, alert sent).
 - Code touching `cell/controller`, `cell/drivers/cnc_io`, or anything named `safety` requires plan mode and a human review before merging.
