@@ -1,0 +1,61 @@
+# Simulated cell used for M0 development and tests.
+# All values here are placeholders for the sim; real cells get their own file
+# with poses taught on the robot and timeouts measured on the machine.
+cell_id: sim-01
+machine:
+  kind: vmc
+  controller: sim
+
+# Named robot poses: [x_mm, y_mm, z_mm, rx_deg, ry_deg, rz_deg]
+poses:
+  home:             [0, 0, 400, 180, 0, 0]
+  above_raw_tray:   [300, -200, 250, 180, 0, 0]
+  pick_raw:         [300, -200, 120, 180, 0, 0]
+  above_fixture:    [650, 0, 300, 180, 0, 0]
+  load:             [650, 0, 180, 180, 0, 0]
+  clear_of_machine: [350, 0, 350, 180, 0, 0]
+  above_done_tray:  [300, 200, 250, 180, 0, 0]
+  place_done:       [300, 200, 120, 180, 0, 0]
+
+# Poses where the arm is inside the machine envelope. The door must be confirmed
+# fully open and the spindle stopped before the arm may be at or moving to these.
+machine_zone_poses: [above_fixture, load]
+
+# Max seconds allowed in each state before the controller goes to SAFE.
+timeouts_s:
+  pick_raw: 20
+  load: 20
+  clamp: 5
+  retreat: 15
+  machining: 600
+  unclamp: 5
+  unload: 20
+  place_done: 20
+  door: 8
+
+# Logical signal -> physical pin/address on the CNC I/O or safety relay.
+pins:
+  door_open_out: "Y0.0"
+  door_close_out: "Y0.1"
+  door_open_in: "X0.4"
+  door_closed_in: "X0.0"
+  clamp_out: "Y0.2"
+  clamped_in: "X0.1"
+  cycle_start_out: "Y0.3"
+  cycle_done_in: "X0.2"
+  feed_hold_out: "Y0.4"
+  alarm_in: "X0.3"
+  estop_ok_in: "X1.0"
+  guard_closed_in: "X1.1"
+
+watchman:
+  sample_hz: 100
+  stale_after_s: 0.5
+  baseline_window_s: 30
+  # Tool break: cutting current falls below this fraction of baseline.
+  tool_break_current_ratio: 0.4
+  # Jam/overload: absolute spindle current ceiling.
+  overload_current_a: 25.0
+  vibration_rms_max_g: 3.0
+  # Chip buildup: baseline current drifts above this fraction of the first-cycle baseline.
+  chip_drift_ratio: 1.3

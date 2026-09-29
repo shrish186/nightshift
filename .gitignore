@@ -1,0 +1,10 @@
+data/
+__pycache__/
+.venv/
+.env
+*.parquet
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
