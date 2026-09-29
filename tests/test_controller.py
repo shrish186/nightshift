@@ -431,3 +431,40 @@ def test_fault_revealed_by_a_command_stops_before_the_next_step() -> None:
     assert ctrl.state is S.SAFE
     assert "clamp_confirmed_without_travel" in ctrl.last_safe_reason
     assert cell.violations == []
+
+
+def test_arm_waits_worst_case_stroke_time_even_if_sensor_sticks_late() -> None:
+    """Open stuck on + closed dead appearing 1.4 s into a 2 s stroke looks like a quick
+    real stroke. The arm must still wait for the worst-case stroke time before entering."""
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    assert ctrl.start_cycle(PROGRAM)
+    run_one_cycle_until(cell, ctrl, S.OPEN_DOOR_LOAD)
+    ctrl.step()  # open command goes out
+    for _ in range(14):
+        cell.clock.advance(0.1)
+        ctrl.step()
+    assert cell.cnc.door() == "moving"
+    cell.cnc.inject(CncFault.DOOR_SENSORS_STUCK_OPEN)
+    run_one_cycle_until(cell, ctrl, S.CLAMP)
+    assert cell.violations == []
+
+
+@pytest.mark.parametrize("how", ["door left open", "stuck-open pair on a closed door"])
+def test_reset_refused_unless_door_reads_closed(how: str) -> None:
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    if how == "door left open":
+        assert ctrl.start_cycle(PROGRAM)
+        run_one_cycle_until(cell, ctrl, S.PLACE_DONE)  # door open, arm outside
+        while cell.robot.at_pose() != "home" and ctrl.state is S.PLACE_DONE:
+            ctrl.step()
+            cell.clock.advance(0.1)
+        ctrl.request_safe("test")
+        ctrl.step()
+    else:
+        go_safe_at_home(cell, ctrl)
+        cell.cnc.inject(CncFault.DOOR_SENSORS_STUCK_OPEN)
+    cell.cnc.operator_clear()
+    why = ctrl.reset("asha")
+    assert why is not None and "door not confirmed closed" in why
