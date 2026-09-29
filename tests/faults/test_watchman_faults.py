@@ -260,3 +260,18 @@ def test_reset_refused_while_sensor_data_is_stale() -> None:
     system.watchman.reset()
     why = system.ctrl.reset("asha")
     assert why is not None and "no fresh sensor data" in why
+
+
+def test_internal_watchman_error_is_reported_by_health(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sensors fine, but the watchman's own processing fails: it can't watch."""
+    cell = new_cell()
+    system = make_system(cell)
+
+    def broken_update(*args: object) -> None:
+        raise ZeroDivisionError("bad window")
+
+    monkeypatch.setattr(system.watchman._detector, "update", broken_update)
+    system.watchman.tick()
+    why = system.watchman.health()
+    assert why is not None and "ZeroDivisionError" in why
+    assert not system.ctrl.start_cycle(PROGRAM)
