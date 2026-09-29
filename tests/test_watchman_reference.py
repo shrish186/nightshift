@@ -142,3 +142,17 @@ def test_reference_cycles_must_be_at_least_three() -> None:
     raw["watchman"]["reference_cycles"] = 2
     with pytest.raises(ValueError):
         CellConfig.model_validate(raw)
+
+
+def test_cycle_with_findings_cannot_join_a_reference() -> None:
+    from cell.drivers.sim.sensors import SensorFault
+
+    cell, system = fresh()
+    w = system.watchman
+    w.begin_reference(PROGRAM, OPERATOR, fresh_tool_confirmed=True)
+    cell.sensors.inject(SensorFault.CHIP_BUILDUP)  # this cut will raise a chip alert
+    supervised_cycle(cell, system)
+    assert system.watchman_alerts, "expected a chip alert in that cycle"
+    why = w.confirm_cycle_clean(OPERATOR)
+    assert why is not None and "had watchman findings" in why
+    assert w.recording_progress == (0, cell.cfg.watchman.reference_cycles)
