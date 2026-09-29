@@ -437,8 +437,9 @@ def test_fault_revealed_by_a_command_stops_before_the_next_step() -> None:
 
 def test_arm_waits_worst_case_stroke_time_even_if_sensor_sticks_late() -> None:
     """Open stuck on + closed dead appearing 1.4 s into a 2 s stroke looks like a quick
-    real stroke. The arm must still wait for the worst-case stroke time before entering."""
-    cell = new_cell()
+    real stroke. The arm must still wait for the worst-case stroke time before entering.
+    Software layer alone: with the hardware interlock fitted it would mask this."""
+    cell = new_cell(zone_interlock=False)
     ctrl, _ = make(cell)
     assert ctrl.start_cycle(PROGRAM)
     run_one_cycle_until(cell, ctrl, S.OPEN_DOOR_LOAD)
