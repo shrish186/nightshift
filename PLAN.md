@@ -3,7 +3,8 @@
 > Status: first draft. Every number marked **[verify]** is an assumption we have not checked yet.
 > Owners: Shrish (backend/cloud/AI/business), CS cofounder (controller/vision/watchman), HW cofounder (arm/gripper/fixtures/guarding).
 > Team is based in Amherst, MA; pilots and installs happen in India. Pilots via founders' contacts at large factories.
-> Decision (2026-09-29): **we are building the arm + watchman together, done properly, and raising funding for it.** The watchman ships first as the safety/trust layer the arm depends on; the arm is developed in parallel, not deferred.
+> Decision (2026-09-29): **we are building the arm + watchman together, done properly, and raising funding for it.** The watchman ships first as the safety/trust layer the arm depends on.
+> Decision (2026-09-29, later): **watchman-first for December shop pilots.** The watchman ships standalone (node per machine + shop hub + owner app), **alert-only by default**, auto-stop opt-in per machine. The arm/cell code is frozen as-is (M0 done, sim only) until January. Architecture: `docs/watchman-architecture.md`; hardware: `hardware/bom.md`.
 
 ---
 
@@ -68,19 +69,29 @@ Cheap cobot cell vs. simple gantry loader. Ranges are placeholders until real qu
 
 ## 4. Milestones  ← current milestone lives here
 
-Two tracks in parallel. The watchman ships to pilots first (cheap, fast, builds trust and data); the arm is built on the bench at the same time and joins the watchman on the pilot machine.
+**M0 (cell sim) is done:** controller, SAFE, watchman sim, plausibility, fault injection, sim.run demo (2026-09-29). The arm track pauses here until January.
 
-| # | Watchman track (CS + Shrish) | Arm track (HW + CS) | Done when | Status |
+### Watchman track to December pilots
+
+| # | Milestone | Done when | Target | Status |
 |---|---|---|---|---|
-| **M0** | Sensor/`CncIo` interfaces + mocks, telemetry agent (offline-first) | `Robot`/`Gripper` interfaces + mocks, controller state machine, fault-injection tests | Full load→machine→unload cycle + injected faults pass in sim; CI green | **← NOW** |
-| M1 | Sensor kit on 3–5 machines at pilot factory, record labeled data | Pick 1 part family at pilot factory; choose cobot + gripper; bench cell in Amherst | 2–4 weeks of labeled data; bench arm loads a dummy fixture | |
-| M2 | Alerts only (WhatsApp), measure false alarms | 500 consecutive bench cycles against sim CNC/PLC, zero unsafe events | False alarms < 1/night **[target]**; bench reliability number | |
-| **Raise** | — | — | Pilot data + bench video + LOIs from factory contacts → seed round | |
-| M3 | Watchman commands feed hold on high-confidence faults | Cell shipped to India, installed on 1 machine, supervised runs | 10 supervised shifts, every stop explained | |
-| M4 | — | Unattended shifts with watchman as the safety layer | First paid machine-hours | |
-| M5 | Watchman rolled out plant-wide | 3 cells across 2 factories | Install ≤ 2 days; repeatable | |
+| **W0** | Design: node / hub / cloud split, BOM, remote-pause protocol | Docs reviewed | 2026-10-03 | **← NOW** |
+| W1 | Node hard-stop rules in portable C, parity with the Python reference | Identical decisions on all golden data; CI builds C | 2026-10-10 | |
+| W2 | Node firmware (sensors, features, hard stops, relay, MQTT, record mode) + `tools/record` | 2 node kits recording at a makerspace; Parquet + labels flowing | 2026-10-24 | |
+| W3 | Makerspace data: ≥ 20 labelled sessions incl. real tool breaks / wear | Parity suite and detector thresholds re-run on real data | 2026-11-07 | |
+| W4 | Hub service (ingest, detectors, references, operator page, node-offline) + telemetry agent | Hub runs 48 h on a bench with 2 nodes, network pulled repeatedly, no data lost | 2026-11-14 | |
+| W5 | WhatsApp alerts (templates approved) + owner web app (OTP, read-only, signed remote pause, audit) | Pause from a phone reaches a bench node and is confirmed back; no start path exists | 2026-11-28 | |
+| W6 | Pilot installs: 2 factories, 3–5 machines each, **alert-only** | Nodes live, owners get alerts | 2026-12-05 | |
+| W7 | Pilot review | False-alert rate, caught events, owner feedback; decide which machines opt in to auto-stop | 2026-12-31 | |
 
-**India on-the-ground:** from M3 we need a full-time field engineer in India (first hire after raise). Until then, installs are done by founders during trips.
+**Long lead items, start now:** WhatsApp Business verification + template approval; SMS/OTP provider account; node parts order (2 recording kits in October, pilot kits by mid-November); pilot factories' permission to wire the feed-hold relay.
+
+### Arm track (paused until January)
+
+| # | Milestone | Done when | Status |
+|---|---|---|---|
+| M0 | Desk sim | Done 2026-09-29 | ✅ |
+| M1–M5 | Bench cell, supervised then unattended pilot, billing | See earlier plan; resumes January with real watchman data | paused |
 
 ## 5. Architecture (maps to CLAUDE.md)
 
@@ -107,6 +118,9 @@ nightshift/
 6. **Team logistics** — team is in Amherst; need an India field engineer by M3.
 7. **Indian labor is cheap** (operators ~₹15–25k/month **[verify]**). The arm must win on more than wage savings: attrition/absenteeism, consistency, running hours people won't work, and watchman-backed safety. Validate this with every pilot factory.
 8. **Hardware fundraising** — investors will want pilot data and a working bench cell before a real check; plan the raise around M2.
+9. **WhatsApp Business verification / template approval** can take weeks — start now or pilots launch without WhatsApp.
+10. **Feed-hold wiring** into customers' CNCs (warranty, service contracts, controller variety). Alert-only default means pilots don't depend on it.
+11. **False alerts** kill trust faster than missed ones: pilot thresholds come from makerspace data, and alert rate is the first pilot metric.
 
 ## 7. Cost tracker
 
@@ -124,6 +138,14 @@ Fill in real quotes as they arrive. Never delete old rows; add a new row when a 
 | CT clamp / accelerometer / mic | | | | | | |
 | Trays / fixtures | | | | | | |
 | Install (per cell) | | | | | | |
+| Watchman node kit (see hardware/bom.md) | | | | | | |
+| ESP32-S3-DevKitC-1 | | | | | | |
+| SCT-013 clamp + ADS1115 | | | | | | |
+| ADXL345 / ADXL355 | | | | | | |
+| DIN interface relay | | | | | | |
+| Shop hub (Pi 5 kit + UPS + 4G) | | | | | | |
+| WhatsApp Business API (per-conversation) | | | | | | |
+| SMS OTP provider | | | | | | |
 
 ## 8. Open questions (answer through customer interviews)
 
@@ -136,7 +158,7 @@ Fill in real quotes as they arrive. Never delete old rows; add a new row when a 
 
 ## 9. Next 2 weeks
 
-- [ ] **Shrish:** 15 customer calls/visits via contacts in 2 clusters; fill section 7. Set up repo, CI, telemetry agent skeleton.
-- [ ] **CS:** driver interfaces + mocks, controller state machine with tests (M0).
-- [ ] **HW:** get quotes for 3 cobots and 1 gantry option into the cost tracker (price, payload, India support); sensor kit BOM for M1.
-- [ ] **All:** pick the one friendly shop for M1.
+- [ ] **Shrish:** WhatsApp Business verification + templates; SMS OTP provider account; line up 2 makerspace sessions; confirm the 2 pilot factories and machines; review watchman design docs.
+- [ ] **CS:** W1 hard-stop parity (C + Python), then node firmware skeleton.
+- [ ] **HW:** order 2 node recording kits; answer the open questions in `hardware/bom.md` (clamp range, feed-hold input per pilot machine, accel choice).
+- [ ] **All:** review `docs/watchman-architecture.md`.
