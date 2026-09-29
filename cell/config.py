@@ -25,7 +25,14 @@ REQUIRED_POSES = frozenset(
     }
 )
 
-Pose = tuple[float, float, float, float, float, float]
+# Pose coordinates are driver-specific and live only in config and the driver.
+# cobot6: (x_mm, y_mm, z_mm, rx_deg, ry_deg, rz_deg); gantry: 2 or 3 linear axes in mm.
+Pose = tuple[float, ...]
+
+POSE_LENGTHS: dict[str, frozenset[int]] = {
+    "cobot6": frozenset({6}),
+    "gantry": frozenset({2, 3}),
+}
 
 
 class _Strict(BaseModel):
@@ -35,6 +42,10 @@ class _Strict(BaseModel):
 class MachineConfig(_Strict):
     kind: Literal["vmc", "lathe"]
     controller: str
+
+
+class RobotConfig(_Strict):
+    kind: Literal["cobot6", "gantry"]
 
 
 class Timeouts(_Strict):
@@ -77,6 +88,7 @@ class WatchmanConfig(_Strict):
 class CellConfig(_Strict):
     cell_id: str
     machine: MachineConfig
+    robot: RobotConfig
     poses: dict[str, Pose]
     machine_zone_poses: frozenset[str]
     timeouts_s: Timeouts
@@ -98,6 +110,17 @@ class CellConfig(_Strict):
             raise ValueError(f"machine_zone_poses not in poses: {sorted(unknown)}")
         if not self.machine_zone_poses:
             raise ValueError("machine_zone_poses must not be empty")
+        return self
+
+    @model_validator(mode="after")
+    def _pose_shape_matches_robot(self) -> CellConfig:
+        allowed = POSE_LENGTHS[self.robot.kind]
+        bad = sorted(n for n, p in self.poses.items() if len(p) not in allowed)
+        if bad:
+            raise ValueError(
+                f"poses {bad} have wrong number of axes for robot kind {self.robot.kind!r} "
+                f"(expected {sorted(allowed)})"
+            )
         return self
 
 

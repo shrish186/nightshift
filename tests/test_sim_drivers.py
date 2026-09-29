@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from cell.config import load_cell_config
+from cell.config import CellConfig, load_cell_config
 from cell.drivers.cnc_io import CncIo
 from cell.drivers.gripper import Gripper
 from cell.drivers.robot import Robot, RobotStatus
@@ -247,3 +247,19 @@ def test_sim_flags_cycle_start_with_arm_inside(cell: SimCell) -> None:
     cell.clock.advance(10)
     cell.cnc.cycle_start()
     assert any("arm in machine" in v for v in cell.violations)
+
+
+def test_gantry_sim_uses_same_interface() -> None:
+    from tests.test_config import GANTRY_POSES
+
+    raw = load_cell_config(SIM_CELL).model_dump()
+    raw["robot"] = {"kind": "gantry"}
+    raw["poses"] = GANTRY_POSES
+    cell = build_sim_cell(CellConfig.model_validate(raw))
+    robot: Robot = cell.robot
+    robot.move_to("tray_slot_3")
+    cell.clock.advance(10)
+    assert robot.at_pose() == "tray_slot_3"
+    robot.move_to("safe_home")
+    cell.clock.advance(10)
+    assert robot.at_pose() == "safe_home"

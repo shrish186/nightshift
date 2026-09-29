@@ -6,7 +6,11 @@ machine:
   kind: vmc
   controller: sim
 
-# Named robot poses: [x_mm, y_mm, z_mm, rx_deg, ry_deg, rz_deg]
+robot:
+  kind: cobot6
+
+# Named robot poses. cobot6: [x_mm, y_mm, z_mm, rx_deg, ry_deg, rz_deg].
+# The required role poses must exist; extra names (e.g. tray_slot_3) are allowed.
 poses:
   home:             [0, 0, 400, 180, 0, 0]
   above_raw_tray:   [300, -200, 250, 180, 0, 0]

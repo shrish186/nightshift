@@ -1,4 +1,10 @@
-"""Robot arm interface. Commands are non-blocking; the controller polls status()."""
+"""Robot interface. Commands are non-blocking; the controller polls status().
+
+The interface speaks only in *named poses* ("load", "tray_slot_3", "safe_home").
+Coordinates, joint angles, axis counts and kinematics live in the cell config and
+the driver, never in business logic. That way a cheap 2-3 axis gantry loader and a
+6-axis cobot both implement this same interface.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +21,7 @@ class RobotStatus(Enum):
 
 class Robot(Protocol):
     def move_to(self, pose: str) -> None:
-        """Start moving to a named pose from the cell config. Ignored unless IDLE."""
+        """Start moving to a pose, by name, from the cell config. Ignored unless IDLE."""
 
     def stop(self) -> None:
         """Protective stop. Always accepted, from any status."""

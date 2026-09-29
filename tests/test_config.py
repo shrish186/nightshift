@@ -50,3 +50,46 @@ def test_zone_pose_must_exist(sim_cell_raw: dict[str, Any]) -> None:
     raw["machine_zone_poses"] = ["load", "inside_chuck"]
     with pytest.raises(ValidationError, match="machine_zone_poses"):
         CellConfig.model_validate(raw)
+
+
+GANTRY_POSES = {
+    "home": [0, 0, 400],
+    "above_raw_tray": [300, -200, 250],
+    "pick_raw": [300, -200, 120],
+    "tray_slot_3": [340, -200, 120],
+    "above_fixture": [650, 0, 300],
+    "load": [650, 0, 180],
+    "clear_of_machine": [350, 0, 350],
+    "above_done_tray": [300, 200, 250],
+    "place_done": [300, 200, 120],
+    "safe_home": [0, 0, 450],
+}
+
+
+def test_gantry_config_with_extra_named_poses_loads(sim_cell_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    raw["robot"] = {"kind": "gantry"}
+    raw["poses"] = GANTRY_POSES
+    cfg = CellConfig.model_validate(raw)
+    assert cfg.poses["tray_slot_3"] == (340, -200, 120)
+
+
+def test_six_axis_pose_rejected_for_gantry(sim_cell_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    raw["robot"] = {"kind": "gantry"}  # poses in sim-01 are 6-axis
+    with pytest.raises(ValidationError, match="wrong number of axes"):
+        CellConfig.model_validate(raw)
+
+
+def test_three_axis_pose_rejected_for_cobot(sim_cell_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    raw["poses"]["load"] = [650, 0, 180]
+    with pytest.raises(ValidationError, match="wrong number of axes"):
+        CellConfig.model_validate(raw)
+
+
+def test_robot_kind_required(sim_cell_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    del raw["robot"]
+    with pytest.raises(ValidationError):
+        CellConfig.model_validate(raw)
