@@ -194,8 +194,7 @@ def build(args: argparse.Namespace) -> Run:
     sensors = RecordingSensors(cell.sensors)
     store = ReferenceStore(args.store)
     watchman = Watchman(cfg, cell.clock, sensors, cell.cnc, ctrl.request_safe, alerter, store)
-    ctrl.reset_checks.append(watchman.health)
-    ctrl.start_checks.append(watchman.prepare)
+    ctrl.attach_watchman(watchman)
     return Run(cfg, cell, ctrl, watchman, alerter, sensors, args.speed)
 
 

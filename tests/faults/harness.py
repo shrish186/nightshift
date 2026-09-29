@@ -131,11 +131,23 @@ class Runner(Protocol):
     def step(self) -> bool: ...
 
 
+class HealthyWatchmanStub:
+    """For controller-only tests: a watchman that is always healthy and prepared."""
+
+    def health(self) -> str | None:
+        return None
+
+    def prepare(self, program: str, supervised: bool) -> str | None:
+        return None
+
+
 def make_controller(cell: SimCell) -> tuple[CellController, MemoryAlerter]:
+    """Controller with a stub healthy watchman (make_system() attaches the real one)."""
     alerter = MemoryAlerter()
     ctrl = CellController(
         cell.cfg, cell.clock, cell.robot, cell.gripper, cell.cnc, cell.safety, alerter
     )
+    ctrl.attach_watchman(HealthyWatchmanStub())
     return ctrl, alerter
 
 
@@ -191,8 +203,7 @@ def make_system(cell: SimCell, with_reference: bool = True) -> System:
     watchman = Watchman(
         cell.cfg, cell.clock, cell.sensors, cell.cnc, ctrl.request_safe, alerter, store
     )
-    ctrl.reset_checks.append(watchman.health)
-    ctrl.start_checks.append(watchman.prepare)
+    ctrl.attach_watchman(watchman)
     return System(ctrl, watchman, alerter)
 
 

@@ -15,7 +15,7 @@ from cell.drivers.robot import RobotStatus
 from cell.drivers.sim.cell import SimCell
 from cell.drivers.sim.cnc import CncFault
 from cell.log import JsonFormatter
-from tests.faults.harness import PROGRAM, new_cell
+from tests.faults.harness import PROGRAM, HealthyWatchmanStub, new_cell
 
 S = State
 
@@ -45,6 +45,7 @@ def make(cell: SimCell) -> tuple[CellController, MemoryAlerter]:
     ctrl = CellController(
         cell.cfg, cell.clock, cell.robot, cell.gripper, cell.cnc, cell.safety, alerter
     )
+    ctrl.attach_watchman(HealthyWatchmanStub())
     return ctrl, alerter
 
 
@@ -598,3 +599,56 @@ def test_interlock_fault_reported_by_the_safety_relay_goes_safe() -> None:
     cell.safety.inject(SafetyFault.ZONE_INTERLOCK_FAULT)
     ctrl.step()
     assert ctrl.state is S.SAFE and "door zone interlock" in ctrl.last_safe_reason
+
+
+# --- unattended start fails closed without a healthy watchman ---
+
+
+class _Link:
+    def __init__(self, health: str | None = None, prepare: str | None = None) -> None:
+        self._health, self._prepare = health, prepare
+
+    def health(self) -> str | None:
+        return self._health
+
+    def prepare(self, program: str, supervised: bool) -> str | None:
+        return self._prepare
+
+
+def _bare(cell: SimCell) -> CellController:
+    return CellController(
+        cell.cfg, cell.clock, cell.robot, cell.gripper, cell.cnc, cell.safety, MemoryAlerter()
+    )
+
+
+def test_unattended_start_refused_with_no_watchman_attached() -> None:
+    ctrl = _bare(new_cell())
+    assert not ctrl.start_cycle(PROGRAM)
+    assert "no watchman attached" in ctrl.last_start_refusal
+
+
+def test_supervised_start_allowed_without_a_watchman() -> None:
+    ctrl = _bare(new_cell())
+    assert ctrl.start_cycle(PROGRAM, supervised=True)
+
+
+@pytest.mark.parametrize(
+    ("link", "expect"),
+    [
+        (_Link(health="node offline"), "node offline"),
+        (_Link(prepare="no reference"), "no reference"),
+    ],
+)
+def test_unattended_start_refused_unless_watchman_healthy_and_prepared(
+    link: _Link, expect: str
+) -> None:
+    ctrl = _bare(new_cell())
+    ctrl.attach_watchman(link)
+    assert not ctrl.start_cycle(PROGRAM)
+    assert expect in ctrl.last_start_refusal
+
+
+def test_unattended_start_accepted_with_healthy_watchman() -> None:
+    ctrl = _bare(new_cell())
+    ctrl.attach_watchman(_Link())
+    assert ctrl.start_cycle(PROGRAM)

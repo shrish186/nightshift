@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import Protocol, TypeAlias
 
 from cell.clock import Clock
 from cell.config import CellConfig, ProgramConfig
@@ -375,6 +375,16 @@ STATE_TABLE: dict[State, StateSpec] = {
 }
 
 
+class WatchmanLink(Protocol):
+    """What the controller needs from the watchman."""
+
+    def health(self) -> str | None:
+        """None when it can watch; otherwise why not (e.g. node offline, stop latched)."""
+
+    def prepare(self, program: str, supervised: bool) -> str | None:
+        """Select this program's reference; None = OK to start, else why not."""
+
+
 @dataclass(frozen=True)
 class Transition:
     ts: float
@@ -427,12 +437,8 @@ class CellController:
         self.cycles_completed = 0
         self.last_safe_reason = ""
         self.history: list[Transition] = []
-        # Extra checks reset() must pass, e.g. the watchman's health. Each returns None
-        # when OK, or why a reset must be refused.
-        self.reset_checks: list[Callable[[], str | None]] = []
-        # Checks start_cycle() must pass, given (program, supervised); e.g. the watchman
-        # refusing an unattended run with no confirmed reference.
-        self.start_checks: list[Callable[[str, bool], str | None]] = []
+        # The watchman this cell runs with. Unattended starts fail closed without one.
+        self._watchman: WatchmanLink | None = None
         self.supervised = False
         self.last_start_refusal = ""
         self._start_requested = False
@@ -445,16 +451,29 @@ class CellController:
         self._step_started_at = 0.0
 
     # --- public API ---
+    def attach_watchman(self, link: WatchmanLink) -> None:
+        self._watchman = link
+
+    def watchman_health(self) -> str | None:
+        """None if an attached watchman is healthy, else why not (fails closed)."""
+        if self._watchman is None:
+            return "no watchman attached"
+        return self._watchman.health()
+
     def start_cycle(self, program: str, supervised: bool = False) -> bool:
         """Request one cycle of a configured CNC program. Only accepted in IDLE.
 
         supervised=True means a person is watching this cycle (e.g. while recording a
-        watchman reference). Unattended cycles must pass every start check."""
+        watchman reference). An unattended cycle FAILS CLOSED: it needs a watchman that
+        is attached, healthy, and prepared (reference present) for this program."""
         if self.state is not State.IDLE or self._start_requested:
             return False
         refusal = None if program in self._cfg.programs else f"unknown program {program!r}"
-        for check in self.start_checks:
-            refusal = refusal or check(program, supervised)
+        if refusal is None and not supervised:
+            why = self.watchman_health()
+            refusal = f"unattended start refused: {why}" if why else None
+        if refusal is None and self._watchman is not None:
+            refusal = self._watchman.prepare(program, supervised)
         if refusal is not None:
             self.last_start_refusal = refusal
             log.info(
@@ -508,8 +527,8 @@ class CellController:
             blockers.append("feed hold not cleared at the machine")
         if not (c.cnc.door_closed() and not c.cnc.door_open()):
             blockers.append("door not confirmed closed")
-        for check in self.reset_checks:
-            why = check()
+        if self._watchman is not None:
+            why = self._watchman.health()
             if why is not None:
                 blockers.append(why)
         # The person has checked the cell: accept current readings as the new baseline.

@@ -16,7 +16,7 @@ from cell.drivers.sim.cell import SimCell
 from cell.drivers.sim.cnc import CncFault
 from cell.drivers.sim.gripper import GripperFault
 from cell.drivers.sim.robot import RobotFault
-from tests.faults.harness import PROGRAM, new_cell
+from tests.faults.harness import PROGRAM, HealthyWatchmanStub, new_cell
 
 S = State
 STOPPED = (RobotStatus.STOPPED, RobotStatus.FAULT, RobotStatus.FORCE_LIMIT)
@@ -27,6 +27,7 @@ def make(cell: SimCell) -> tuple[CellController, MemoryAlerter]:
     ctrl = CellController(
         cell.cfg, cell.clock, cell.robot, cell.gripper, cell.cnc, cell.safety, alerter
     )
+    ctrl.attach_watchman(HealthyWatchmanStub())
     return ctrl, alerter
 
 
