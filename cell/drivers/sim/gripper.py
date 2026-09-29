@@ -14,7 +14,7 @@ ACTUATE_S = 0.3
 class GripperFault(Enum):
     EMPTY_GRIP = "empty_grip"  # closes but misses the part
     DROP = "drop"  # part slips out while held
-    STUCK = "stuck"  # jaws never finish moving
+    STUCK = "stuck"  # jaws jam where they are (open, closed or mid-stroke); commands do nothing
 
 
 class SimGripper:
@@ -24,16 +24,22 @@ class SimGripper:
         self._closed_cmd = False
         self._done_at = 0.0
         self._has_part = False
-        self._stuck = False
+        self._frozen: str | None = None  # physical jaw position once jammed
         self._empty_grip = False
         # Wired by SimCell: told when a held part is released, and when a grip succeeds.
         self.on_release: Callable[[], None] = lambda: None
         self.on_grip: Callable[[], None] = lambda: None
 
-    def _settled(self) -> bool:
-        return not self._stuck and self._clock.now() >= self._done_at
+    def jaws(self) -> str:
+        """Physical jaw position: "open", "closed" or "moving"."""
+        if self._frozen is not None:
+            return self._frozen
+        target = "closed" if self._closed_cmd else "open"
+        return target if self._clock.now() >= self._done_at else "moving"
 
     def open(self) -> None:
+        if self._frozen is not None:
+            return  # jammed: the command has no physical effect
         if self.has_part():
             self.on_release()
         self._closed_cmd = False
@@ -41,6 +47,8 @@ class SimGripper:
         self._done_at = self._clock.now() + ACTUATE_S
 
     def close(self) -> None:
+        if self._frozen is not None:
+            return  # jammed: the command has no physical effect
         self._closed_cmd = True
         self._has_part = self._part_at_tool() and not self._empty_grip
         self._done_at = self._clock.now() + ACTUATE_S
@@ -48,10 +56,10 @@ class SimGripper:
             self.on_grip()
 
     def is_open(self) -> bool:
-        return not self._closed_cmd and self._settled()
+        return self.jaws() == "open"
 
     def is_closed(self) -> bool:
-        return self._closed_cmd and self._settled()
+        return self.jaws() == "closed"
 
     def has_part(self) -> bool:
         return self.is_closed() and self._has_part
@@ -63,4 +71,4 @@ class SimGripper:
         elif fault is GripperFault.DROP:
             self._has_part = False
         elif fault is GripperFault.STUCK:
-            self._stuck = True
+            self._frozen = self.jaws()

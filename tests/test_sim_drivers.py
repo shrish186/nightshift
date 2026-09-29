@@ -453,3 +453,13 @@ def test_tool_wear_grows_cycle_over_cycle() -> None:
         sensors.read()
     assert means[0] < means[1] < means[2]
     assert means[2] / means[0] == pytest.approx(1.2)
+
+
+def test_gripper_jammed_open_stays_open(cell: SimCell) -> None:
+    cell.clock.advance(1)
+    assert cell.gripper.is_open()
+    cell.gripper.inject(GripperFault.STUCK)
+    assert cell.gripper.is_open()  # still physically open
+    cell.gripper.close()
+    cell.clock.advance(5)
+    assert cell.gripper.is_open() and not cell.gripper.is_closed()
