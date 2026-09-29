@@ -415,14 +415,16 @@ class CellController:
         if faults:
             blockers.append(f"sensor plausibility: {[f.value for f in faults]}")
         if not blockers:
-            c.robot.reset()
+            # Check where the arm is BEFORE unlatching it: never release a robot that is
+            # inside the machine or at an unknown position.
             where = arm_outside_machine(c)
-            if c.robot.status() is not RobotStatus.IDLE:
-                blockers.append(f"robot not ready ({c.robot.status().value})")
-            elif where is not None:
+            if where is not None:
                 blockers.append(where)
-            if blockers:
-                c.robot.stop()  # re-latch the robot while we stay in SAFE
+            else:
+                c.robot.reset()
+                if c.robot.status() is not RobotStatus.IDLE:
+                    blockers.append(f"robot not ready ({c.robot.status().value})")
+                    c.robot.stop()  # re-latch the robot while we stay in SAFE
         if blockers:
             reason = "; ".join(blockers)
             log.info(

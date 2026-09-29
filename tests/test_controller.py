@@ -317,3 +317,37 @@ def run_one_cycle_until(cell: SimCell, ctrl: CellController, state: State) -> No
         if ctrl.state in (state, S.SAFE):
             return
         cell.clock.advance(0.1)
+
+
+@pytest.mark.parametrize("where", ["inside", "unknown"])
+def test_reset_never_unlatches_robot_unless_arm_is_outside(
+    where: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    assert ctrl.start_cycle()
+    if where == "inside":
+        run_one_cycle_until(cell, ctrl, S.CLAMP)
+        ctrl.request_safe("test")
+        ctrl.step()
+    else:
+        for _ in range(100):
+            ctrl.step()
+            if cell.robot.status() is RobotStatus.MOVING:
+                break
+            cell.clock.advance(0.1)
+        cell.clock.advance(0.2)
+        ctrl.request_safe("test")
+        ctrl.step()
+    cell.cnc.operator_clear()
+    calls: list[int] = []
+    real_reset = cell.robot.reset
+
+    def spy_reset() -> None:
+        calls.append(1)
+        real_reset()
+
+    monkeypatch.setattr(cell.robot, "reset", spy_reset)
+    assert ctrl.reset("asha") is not None
+    assert calls == []  # the robot was never unlatched
+    assert cell.robot.status() is RobotStatus.STOPPED
