@@ -507,3 +507,64 @@ def test_normal_single_sensor_cycle_passes_the_tug_test() -> None:
     ctrl, _ = make(cell)
     run_one_cycle(cell, ctrl)
     assert ctrl.state is S.IDLE and cell.violations == []
+
+
+# --- part-present debounce ---
+
+
+def _cut_for(cell: SimCell, ctrl: CellController, seconds: float) -> None:
+    for _ in range(round(seconds / 0.1)):
+        ctrl.step()
+        cell.clock.advance(0.1)
+
+
+def test_seat_sensor_flicker_during_cut_does_not_stop() -> None:
+    cell = new_cell(cycle_s=20.0)
+    ctrl, _ = make(cell)
+    assert ctrl.start_cycle(PROGRAM)
+    run_one_cycle_until(cell, ctrl, S.MACHINING)
+    cell.cnc.inject(CncFault.PART_SENSOR_FLICKER)
+    while ctrl.state is S.MACHINING:
+        _cut_for(cell, ctrl, 0.1)
+    assert ctrl.state is S.OPEN_DOOR_UNLOAD, ctrl.last_safe_reason
+
+
+def test_part_knocked_crooked_mid_cut_stops_just_after_the_window() -> None:
+    cell = new_cell(cycle_s=20.0)
+    ctrl, _ = make(cell)
+    window = cell.cfg.io_plausibility.part_present_max_ignore_s
+    assert ctrl.start_cycle(PROGRAM)
+    run_one_cycle_until(cell, ctrl, S.MACHINING)
+    _cut_for(cell, ctrl, 3)
+    cell.cnc.inject(CncFault.PART_MISSEATED)
+    t0 = cell.clock.now()
+    while ctrl.state is S.MACHINING:
+        _cut_for(cell, ctrl, 0.1)
+    assert "part not seated" in ctrl.last_safe_reason
+    assert window <= cell.clock.now() - t0 <= window + 0.25
+
+
+def test_flicker_cannot_fake_an_empty_fixture() -> None:
+    """A seated part must never read 'empty' just because the sensor blinked."""
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    cell.cnc.place_part()  # a part left in the fixture
+    cell.cnc.inject(CncFault.PART_SENSOR_FLICKER)
+    run_one_cycle(cell, ctrl)
+    assert ctrl.state is S.SAFE
+    assert "fixture empty" in ctrl.last_safe_reason or "LOAD timeout" in ctrl.last_safe_reason
+    assert cell.violations == []
+
+
+def test_dropout_streak_is_not_inherited_from_an_earlier_state() -> None:
+    """The seat filter last saw 'no part' back in LOAD; a flicker at the very start of
+    the cut must not count all that time as one long dropout."""
+    cell = new_cell(cycle_s=20.0)
+    ctrl, _ = make(cell)
+    assert ctrl.start_cycle(PROGRAM)
+    run_one_cycle_until(cell, ctrl, S.MACHINING)
+    while not cell.cnc.cycle_running():
+        _cut_for(cell, ctrl, 0.1)
+    cell.cnc.inject(CncFault.PART_SENSOR_FLICKER)  # drops out right as the cut begins
+    _cut_for(cell, ctrl, 1.0)
+    assert ctrl.state is S.MACHINING, ctrl.last_safe_reason

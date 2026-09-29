@@ -26,6 +26,7 @@ from cell.clock import Clock
 from cell.config import CellConfig, ProgramConfig
 from cell.controller.alerts import Alert, Alerter
 from cell.controller.plausibility import IoPlausibilityMonitor
+from cell.controller.presence import PartPresence
 from cell.controller.states import State
 from cell.drivers.cnc_io import CncIo
 from cell.drivers.gripper import Gripper
@@ -46,6 +47,9 @@ class Ctx:
     cnc: CncIo
     # True once the worst-case stroke time has passed since the last command on a pair.
     stroke_done: Callable[[str], bool]
+    # Debounced fixture seat sensor (see presence.py).
+    part_seated: Callable[[], bool]
+    fixture_empty: Callable[[], bool]
 
 
 # --- steps: the fixed sequence inside one state ---
@@ -72,6 +76,9 @@ class Command:
 class WaitUntil:
     label: str
     cond: Callable[[Ctx], bool]
+    # Optional bound for this one wait (config-derived); past it -> SAFE. None = the
+    # state timeout is the only bound.
+    within: Callable[[CellConfig], float] | None = None
 
 
 @dataclass(frozen=True)
@@ -142,7 +149,7 @@ def machine_ready_to_cut(c: Ctx) -> str | None:
         return "door not confirmed closed"
     if not c.cnc.clamped():
         return "part not confirmed clamped"
-    if not c.cnc.part_present():
+    if not c.part_seated():
         return "part not seated"
     return arm_outside_machine(c)
 
@@ -256,7 +263,7 @@ STATE_TABLE: dict[State, StateSpec] = {
     State.LOAD: _spec(
         _fixed(
             Require("raw part in gripper", _has_part),
-            Require("fixture empty", lambda c: not c.cnc.part_present()),
+            WaitUntil("fixture empty", lambda c: c.fixture_empty()),
             Move("above_fixture"),
             Move("load"),
             Require("raw part in gripper", _has_part),
@@ -288,6 +295,13 @@ STATE_TABLE: dict[State, StateSpec] = {
     ),
     State.MACHINING: _spec(
         _fixed(
+            # A positive, current reading before the cut starts; waits out a brief sensor
+            # dropout, but a part that isn't seated never starts a cut.
+            WaitUntil(
+                "part seated at cycle start",
+                lambda c: c.cnc.part_present(),
+                within=lambda cfg: cfg.io_plausibility.part_present_max_ignore_s,
+            ),
             Command("cycle start", lambda c: c.cnc.cycle_start()),
             WaitUntil("cycle done", lambda c: c.cnc.cycle_done()),
         ),
@@ -395,8 +409,19 @@ class CellController:
         self._alerter = alerter
         self._plausibility = IoPlausibilityMonitor(cnc, clock, cfg)
         # Door/clamp commands go through the monitor's wrapper so it knows what was asked.
+        self._presence = presence = PartPresence(
+            self._plausibility.cnc.part_present,
+            clock,
+            cfg.io_plausibility.part_present_max_ignore_s,
+        )
         self._ctx = Ctx(
-            cfg, robot, gripper, self._plausibility.cnc, self._plausibility.stroke_time_elapsed
+            cfg,
+            robot,
+            gripper,
+            self._plausibility.cnc,
+            self._plausibility.stroke_time_elapsed,
+            presence.seated,
+            presence.empty_confirmed,
         )
         self.state = State.IDLE
         self.cycles_completed = 0
@@ -529,6 +554,7 @@ class CellController:
         if self._safe_requested is not None:
             raise _GoSafe(f"requested: {self._safe_requested}")
         self._cell_checks()
+        self._presence.sample()
 
         if self.state is State.IDLE:
             if self._start_requested:
@@ -599,7 +625,13 @@ class CellController:
             self._cell_checks()
             return True
         if isinstance(step, WaitUntil):
-            return step.cond(c)
+            if step.cond(c):
+                return True
+            if step.within is not None:
+                limit = step.within(self._cfg)
+                if self._clock.now() - self._step_started_at > limit:
+                    raise _GoSafe(f"{self.state.value}: {step.label} not within {limit:g}s")
+            return False
         if isinstance(step, Dwell):
             return self._clock.now() - self._step_started_at >= step.seconds
         if isinstance(step, Tug):

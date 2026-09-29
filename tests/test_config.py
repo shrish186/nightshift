@@ -197,3 +197,11 @@ def test_watchman_stop_ratio_must_exceed_alert(sim_cell_raw: dict[str, Any], kin
     raw["watchman"][f"{kind}_stop_ratio"] = raw["watchman"][f"{kind}_alert_ratio"]
     with pytest.raises(ValidationError, match=f"{kind}_stop_ratio must be >"):
         CellConfig.model_validate(raw)
+
+
+@pytest.mark.parametrize("value", [0.0, 1.5])
+def test_part_present_ignore_window_bounds(sim_cell_raw: dict[str, Any], value: float) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    raw["io_plausibility"]["part_present_max_ignore_s"] = value
+    with pytest.raises(ValidationError):
+        CellConfig.model_validate(raw)

@@ -17,6 +17,8 @@ from cell.clock import Clock
 DOOR_S = 2.0
 CLAMP_S = 0.5
 DEFAULT_CYCLE_S = 60.0
+FLICKER_PERIOD_S = 3.0
+FLICKER_DROP_S = 0.2
 JAW_CONTACT = 0.8  # jaw position (0 open .. 1 closed) above which they grip the part
 
 
@@ -36,6 +38,8 @@ class CncFault(Enum):
     DOOR_SENSORS_STUCK_OPEN = "door_sensors_stuck_open"  # open stuck on, closed dead
     DOOR_SENSORS_STUCK_CLOSED = "door_sensors_stuck_closed"  # closed stuck on, open dead
     CLAMP_SENSORS_STUCK_CLAMPED = "clamp_sensors_stuck_clamped"  # clamped on, released dead
+    # Fixture seat sensor drops out for 0.2 s every 3 s (coolant, chips, vibration).
+    PART_SENSOR_FLICKER = "part_sensor_flicker"
     # Part sits crooked in the fixture: the one there now, or the next one placed.
     PART_MISSEATED = "part_misseated"
 
@@ -73,6 +77,7 @@ class SimCnc:
         # Physical part in the fixture: "empty", "seated" or "crooked".
         self._fixture = "empty"
         self._misseat_next = False
+        self._flicker_from = 0.0
         # Wired by SimCell: True while the arm holds a part at the load pose.
         self.arm_holding_at_load: Callable[[], bool] = lambda: False
         # Wired by SimCell: True if the arm is in the machine envelope.
@@ -235,6 +240,10 @@ class SimCnc:
         return CncFault.CLAMP_SENSOR_SHORT in self._sensor_faults or self.jaws() == "open"
 
     def part_present(self) -> bool:
+        if CncFault.PART_SENSOR_FLICKER in self._sensor_faults:
+            since = self._clock.now() - self._flicker_from
+            if since % FLICKER_PERIOD_S < FLICKER_DROP_S:
+                return False
         return self._powered and self.seat() == "seated"
 
     # "Bad when true" inputs are wired inverted (see cnc_io.py), so a dead wire reads True.
@@ -279,6 +288,8 @@ class SimCnc:
             # controller must do is stop sending the arm deeper in.
             self._move_door(False)
         else:
+            if fault is CncFault.PART_SENSOR_FLICKER:
+                self._flicker_from = self._clock.now()
             self._sensor_faults.add(fault)
 
     def operator_clear(self) -> None:

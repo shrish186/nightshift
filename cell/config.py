@@ -113,6 +113,10 @@ class IoPlausibility(_Strict):
     # travel has passed since the command before acting on it, so even a sensor that
     # sticks on late in a stroke cannot let the arm move before the stroke could finish.
     max_travel_fraction: float = Field(gt=1)
+    # Fixture seat sensor debounce. While cutting, dropouts shorter than this are ignored;
+    # before loading, "empty" must read continuously for this long. Hard cap 1.0 s.
+    # ASSUMPTION / VERIFY ON HARDWARE: set from the real sensor's dropout lengths.
+    part_present_max_ignore_s: float = Field(gt=0, le=1.0)
 
     @model_validator(mode="after")
     def _window_exceeds_travel(self) -> IoPlausibility:

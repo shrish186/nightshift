@@ -54,6 +54,7 @@ io_plausibility:
   clamp_plausibility_window_s: 1.0
   min_travel_fraction: 0.5  # faster than half the measured stroke = stuck-on sensor
   max_travel_fraction: 1.15  # arm waits for the worst-case stroke time before acting
+  part_present_max_ignore_s: 0.5  # seat-sensor debounce (hard cap 1.0 s)
 
 # Logical signal -> physical pin/address on the CNC I/O or safety relay.
 pins:

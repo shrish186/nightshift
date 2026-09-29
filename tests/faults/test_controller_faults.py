@@ -95,9 +95,10 @@ CASES = {
     "part-dropped-before-clamp": Case(
         S.CLAMP, gripper(GripperFault.DROP), "CLAMP timeout: part seated in fixture"
     ),
-    "part-knocked-crooked-while-cutting": Case(
-        S.MACHINING, cnc(CncFault.PART_MISSEATED), "guard machine_ready_to_cut: part not seated"
-    ),
+    # Knocked crooked before the cut starts: the cycle-start wait or the debounced
+    # guard stops it (same window); either way no cut begins. Mid-cut timing is tested
+    # in test_controller.py::test_part_knocked_crooked_mid_cut_stops_just_after_the_window.
+    "part-knocked-crooked-before-cut": Case(S.MACHINING, cnc(CncFault.PART_MISSEATED), "seated"),
     "gripper-closed-before-unload": Case(
         S.OPEN_DOOR_UNLOAD,
         lambda c, _: c.gripper.close(),
@@ -150,7 +151,7 @@ def test_every_fault_type_is_covered() -> None:
                "DOOR_SENSOR_SHORT", "CLAMP_SENSOR_SHORT", "IO_POWER_LOSS", "FAULT", "STALL",
                "EMPTY_GRIP", "DROP", "DOOR_CLOSES_UNCOMMANDED", "PART_MISSEATED",
                "DOOR_SENSORS_STUCK_OPEN", "DOOR_SENSORS_STUCK_CLOSED",
-               "CLAMP_SENSORS_STUCK_CLAMPED"}  # fmt: skip
+               "CLAMP_SENSORS_STUCK_CLAMPED", "PART_SENSOR_FLICKER"}  # fmt: skip
     all_faults = {f.name for f in (*CncFault, *RobotFault, *GripperFault)}
     # CLAMP_JAM and gripper STUCK are exercised by the random fault tests.
     assert all_faults - covered == {"CLAMP_JAM", "STUCK"}

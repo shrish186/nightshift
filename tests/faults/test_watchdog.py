@@ -94,7 +94,15 @@ def m_no_seat_checks(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
             )
         ),
     )
-    _set(mp, S.MACHINING, guards=(_door_closed_and_clamped,))
+    machining_steps = STATE_TABLE[S.MACHINING].steps(ctrl._cfg)
+    _set(
+        mp,
+        S.MACHINING,
+        steps=_steps(
+            *(s for s in machining_steps if getattr(s, "label", "") != "part seated at cycle start")
+        ),
+        guards=(_door_closed_and_clamped,),
+    )
 
 
 def _door_closed_and_clamped(c: Ctx) -> str | None:  # machine_ready_to_cut minus the seat check
