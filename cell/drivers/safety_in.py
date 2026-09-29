@@ -4,6 +4,14 @@ READ ONLY. The e-stop chain and guard interlocks are wired in hardware and stop 
 robot and machine on their own. Software only reads them so it can react (go to SAFE,
 alert). There is intentionally no method to set, override, or simulate these from
 the controller.
+
+The circuit itself is a certified safety relay (see CLAUDE.md). These reads are
+monitoring contacts from that relay, not the safety function.
+
+FAIL-SAFE WIRING. ASSUMPTION / VERIFY ON HARDWARE:
+Both inputs are true only while the signal is actively present. A broken wire,
+loose connector or loss of power reads False (e-stop NOT ok, guard NOT closed).
+HW to confirm the relay's monitoring outputs behave this way on the real panel.
 """
 
 from __future__ import annotations
