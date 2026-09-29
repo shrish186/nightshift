@@ -99,6 +99,19 @@ def _door_closed_and_clamped(c: Ctx) -> str | None:  # machine_ready_to_cut minu
     return None if c.cnc.door_closed() and c.cnc.clamped() else "not ready"
 
 
+def m_no_gripper_open_check(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
+    steps = STATE_TABLE[S.ENTER_UNLOAD].steps(ctrl._cfg)
+    _set(
+        mp,
+        S.ENTER_UNLOAD,
+        steps=_steps(*(s for s in steps if getattr(s, "label", "") != "gripper open")),
+    )
+
+
+def _close_gripper(cell: SimCell) -> None:
+    cell.gripper.close()
+
+
 def m_no_door_wait(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
     _set(mp, S.OPEN_DOOR_LOAD, steps=_steps(Command("open door", lambda c: c.cnc.open_door())))
     _set(mp, S.LOAD, guards=())
@@ -153,7 +166,8 @@ class Broken:
     faults: tuple[FaultEvent, ...]
     expect: str
     no_release_sensor: bool = False
-    at_state: tuple[State, CncFault] | None = None  # inject when the controller enters it
+    # inject when the controller enters the state: a CncFault, or "close_gripper"
+    at_state: tuple[State, CncFault | str] | None = None
 
 
 BROKEN = {
@@ -179,6 +193,12 @@ BROKEN = {
         "cycle start with part not seated",
         at_state=(S.PICK_RAW, CncFault.PART_MISSEATED),
     ),
+    "enter-fixture-with-gripper-closed": Broken(
+        m_no_gripper_open_check,
+        (),
+        "gripper closed while entering occupied fixture",
+        at_state=(S.OPEN_DOOR_UNLOAD, "close_gripper"),
+    ),
     "skip-fallback-on-no-sensor-machine": Broken(
         m_skip_fallback, (), "while still clamped", no_release_sensor=True
     ),
@@ -189,7 +209,7 @@ def _run_cycle(
     cell: SimCell,
     ctrl: CellController,
     faults: tuple[FaultEvent, ...],
-    at_state: tuple[State, CncFault] | None = None,
+    at_state: tuple[State, CncFault | str] | None = None,
 ) -> None:
     watchman = Watchman(
         cell.cfg, cell.clock, cell.sensors, cell.cnc, ctrl.request_safe, _NoAlerts()
@@ -199,7 +219,11 @@ def _run_cycle(
 
     def step() -> bool:
         if pending and ctrl.state is pending[0][0]:
-            cell.cnc.inject(pending.pop()[1])
+            action = pending.pop()[1]
+            if action == "close_gripper":
+                _close_gripper(cell)
+            elif isinstance(action, CncFault):
+                cell.cnc.inject(action)
         return runner.step()
 
     run_with_faults(cell, step, faults)

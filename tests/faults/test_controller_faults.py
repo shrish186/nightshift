@@ -97,6 +97,11 @@ CASES = {
     "part-knocked-crooked-while-cutting": Case(
         S.MACHINING, cnc(CncFault.PART_MISSEATED), "guard machine_ready_to_cut: part not seated"
     ),
+    "gripper-closed-before-unload": Case(
+        S.OPEN_DOOR_UNLOAD,
+        lambda c, _: c.gripper.close(),
+        "ENTER_UNLOAD requirement failed: gripper open",
+    ),
     "watchman-request": Case(
         S.MACHINING, lambda _, ctrl: ctrl.request_safe("watchman: tool break"), "watchman"
     ),

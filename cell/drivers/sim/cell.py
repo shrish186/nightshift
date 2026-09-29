@@ -87,6 +87,14 @@ def build_sim_cell(
             cell.robot_violations.append(
                 f"{now} arm moving to {target} with door not open or spindle running"
             )
+        # Driving closed, empty jaws onto a part sitting in the fixture crashes into it.
+        if (
+            target == "load"
+            and not gripper.is_open()
+            and not gripper.has_part()
+            and cnc.fixture_has_part()
+        ):
+            cell.robot_violations.append(f"{now} gripper closed while entering occupied fixture")
         # An unlimited move away from the fixture while the part is still clamped is a
         # crash. A force-limited move is the approved fallback; its limit catches it.
         if origin == "load" and force_limit_n is None and holding_clamped_part():

@@ -270,6 +270,8 @@ STATE_TABLE: dict[State, StateSpec] = {
     ),
     State.ENTER_UNLOAD: _spec(
         _fixed(
+            # Closed jaws driven onto the finished part would crash into it.
+            Require("gripper open", lambda c: c.gripper.is_open()),
             Move("above_fixture"),
             Move("load"),
             Command("gripper close", lambda c: c.gripper.close()),
