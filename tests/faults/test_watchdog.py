@@ -31,16 +31,25 @@ from cell.controller.states import State
 from cell.drivers.robot import RobotStatus
 from cell.drivers.sim.cell import SimCell
 from cell.drivers.sim.cnc import CncFault
+from cell.watchman.watchman import Watchman
 from tests.faults.harness import (
     ControllerRunner,
     FaultEvent,
     fault_schedules,
     make_controller,
+    make_system,
     new_cell,
     run_with_faults,
 )
 
 S = State
+
+
+class _NoAlerts:
+    def alert(self, alert: object) -> None:
+        pass
+
+
 Mutation = Callable[[pytest.MonkeyPatch, CellController], None]
 
 
@@ -182,7 +191,10 @@ def _run_cycle(
     faults: tuple[FaultEvent, ...],
     at_state: tuple[State, CncFault] | None = None,
 ) -> None:
-    runner = ControllerRunner(ctrl)
+    watchman = Watchman(
+        cell.cfg, cell.clock, cell.sensors, cell.cnc, ctrl.request_safe, _NoAlerts()
+    )
+    runner = ControllerRunner(ctrl, watchman)
     pending = [at_state] if at_state else []
 
     def step() -> bool:
@@ -244,11 +256,11 @@ def test_random_faults_never_cause_unsafe_events(
     schedule: list[FaultEvent], no_release_sensor: bool, seed: int
 ) -> None:
     cell = new_cell(no_release_sensor, seed=seed)
-    ctrl, alerter = make_controller(cell)
-    runner = ControllerRunner(ctrl)
+    system = make_system(cell)
+    runner = ControllerRunner(system.ctrl, system.watchman)
     run_with_faults(cell, runner.step, schedule)
     assert cell.violations == [], (schedule, cell.violations)
-    assert runner.done or runner.stopped, (schedule, ctrl.state)
+    assert runner.done or runner.stopped, (schedule, system.ctrl.state)
     if runner.stopped:
         assert cell.cnc.feed_hold_active()
         assert cell.robot.status() in (
@@ -256,4 +268,4 @@ def test_random_faults_never_cause_unsafe_events(
             RobotStatus.FAULT,
             RobotStatus.FORCE_LIMIT,
         )
-        assert len(alerter.alerts) == 1
+        assert len(system.safe_alerts) == 1

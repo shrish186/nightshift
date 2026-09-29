@@ -11,7 +11,8 @@ Every detector either needs a condition to hold for a confirm window or works on
 window means, so a single noisy sample can never stop the cell.
 
 Levels are relative, not absolute, wherever possible:
-  - tool break: vs. this cut's settled mean current
+  - tool break: vs. this cut's settled mean current (breaks mid-cut), and this cut's
+    early window mean vs. the reference cycles (tool already broken when the cut starts)
   - chip buildup: recent window mean vs. this cut's early window mean
   - tool wear: each cut's early window mean vs. the reference cycles' mean
 ASSUMPTION: the tool is good for the first `reference_cycles` cuts after start.
@@ -70,6 +71,7 @@ class Detector:
         self._below_since: float | None = None
         self._over_since: float | None = None
         self._early: list[float] = []
+        self._early_judged = False
         self._recent: deque[tuple[float, float]] = deque()
 
     def update(self, frame: SensorFrame | None, now: float, cutting: bool) -> list[Finding]:
@@ -138,6 +140,19 @@ class Detector:
         settled_at = self._cut_start + c.cut_settle_s
         if now < settled_at + c.chip_window_s:
             self._early.append(a)
+        elif not self._early_judged:
+            # --- TOOL_BREAK before the cut: early level vs. the good-tool reference ---
+            self._early_judged = True
+            if self._early and len(self._reference) >= c.reference_cycles:
+                ratio = _mean(self._early) / _mean(self._reference)
+                if ratio < c.tool_break_current_ratio:
+                    out.append(
+                        Finding(
+                            FindingKind.TOOL_BREAK,
+                            Severity.STOP,
+                            f"cut load x{ratio:.2f} of reference from the start",
+                        )
+                    )
         self._recent.append((now, a))
         while self._recent and self._recent[0][0] <= now - c.chip_window_s:
             self._recent.popleft()

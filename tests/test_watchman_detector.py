@@ -200,3 +200,17 @@ def test_wear_does_not_trip_chip_detector(wcfg: WatchmanConfig) -> None:
     """A uniformly higher load across a whole cycle is wear, not chip buildup."""
     for c in _wear(wcfg, [1.3, 1.45]):
         assert all(f.kind is K.TOOL_WEAR for f in c)
+
+
+def test_tool_broken_before_the_cut_starts_stops(wcfg: WatchmanConfig) -> None:
+    """Low load from the first sample means the cut's own mean is low too; the reference
+    cycle is what catches it."""
+    c1, c2 = _wear(wcfg, [0.6, 0.25])
+    assert c1 == []  # lighter cut (e.g. smaller stock) but above the break ratio
+    assert (K.TOOL_BREAK, SEV.STOP) in kinds(c2)
+
+
+def test_broken_tool_before_reference_is_learned_is_not_judged(wcfg: WatchmanConfig) -> None:
+    f = Feed(wcfg)
+    f.idle()
+    assert f.run(8, current=_constant(CUT_A * 0.25)) == []  # nothing to compare against yet

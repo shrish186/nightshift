@@ -32,6 +32,11 @@ def pytest_terminal_summary(terminalreporter: Any) -> None:
             f"{runner}: {r['stops']} stops / {r['cycles']} cycles "
             f"= {r['stop_rate']:.2%} over {r['runs']} runs  {r['reasons'] or ''}"
         )
+        if "alerts" in r:
+            terminalreporter.write_line(
+                f"{runner} alerts (no stop): {r['alerts']} / {r['cycles']} cycles "
+                f"= {r['alert_rate']:.2%}  {r['alert_reasons'] or ''}"
+            )
     out = Path(__file__).resolve().parent.parent / "data" / "reports"
     out.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")

@@ -2,8 +2,9 @@
 
 - Hypothesis strategies for random fault schedules (which faults, when, in what mix).
 - run_with_faults(): steps a sim cell in sim time, injecting faults as they come due.
-- ControllerRunner: drives the real CellController one cycle at a time, for
-  run_cycles() (false stops) and run_with_faults() (random faults).
+- make_system(): the real CellController + Watchman sharing one alerter.
+- ControllerRunner: drives them one cycle at a time, for run_cycles() (false stops)
+  and run_with_faults() (random faults).
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from typing import Any, Protocol
 from hypothesis import strategies as st
 
 from cell.config import CellConfig, load_cell_config
-from cell.controller.alerts import MemoryAlerter
+from cell.controller.alerts import Alert, MemoryAlerter
 from cell.controller.machine import CellController
 from cell.controller.states import State
 from cell.drivers.sim.cell import SimCell, build_sim_cell
@@ -24,6 +25,7 @@ from cell.drivers.sim.cnc import CncFault
 from cell.drivers.sim.gripper import GripperFault
 from cell.drivers.sim.robot import RobotFault
 from cell.drivers.sim.sensors import SensorFault
+from cell.watchman.watchman import ALERT_STATE, Watchman
 from tests.conftest import SIM_CELL
 
 DT = 0.1
@@ -71,10 +73,10 @@ def inject(cell: SimCell, fault: Fault) -> None:
         cell.safety.open_guard()
 
 
-def make_cfg(no_release_sensor: bool = False) -> CellConfig:
+def make_cfg(no_release_sensor: bool = False, cycle_s: float = CYCLE_S) -> CellConfig:
     """sim-01 with a short machining timeout so hung cycles resolve quickly in tests."""
     raw: dict[str, Any] = load_cell_config(SIM_CELL).model_dump()
-    raw["timeouts_s"]["machining"] = CYCLE_S * 3
+    raw["timeouts_s"]["machining"] = max(cycle_s, CYCLE_S) * 3
     if no_release_sensor:
         raw["machine"]["clamp_released_sensor"] = False
         raw["pins"]["unclamped_in"] = None
@@ -86,8 +88,8 @@ def make_cfg(no_release_sensor: bool = False) -> CellConfig:
     return CellConfig.model_validate(raw)
 
 
-def new_cell(no_release_sensor: bool = False, seed: int = 0) -> SimCell:
-    return build_sim_cell(make_cfg(no_release_sensor), seed=seed, cycle_s=CYCLE_S)
+def new_cell(no_release_sensor: bool = False, seed: int = 0, cycle_s: float = CYCLE_S) -> SimCell:
+    return build_sim_cell(make_cfg(no_release_sensor, cycle_s), seed=seed, cycle_s=cycle_s)
 
 
 class Runner(Protocol):
@@ -111,11 +113,43 @@ def make_controller(cell: SimCell) -> tuple[CellController, MemoryAlerter]:
     return ctrl, alerter
 
 
-class ControllerRunner:
-    """One cycle of a CellController. done = back in IDLE with one more cycle; stopped = SAFE."""
+@dataclass
+class System:
+    """Controller + watchman sharing one alerter, as they run on a real cell."""
 
-    def __init__(self, ctrl: CellController) -> None:
+    ctrl: CellController
+    watchman: Watchman
+    alerter: MemoryAlerter
+
+    @property
+    def watchman_alerts(self) -> list[Alert]:
+        return [a for a in self.alerter.alerts if a.state == ALERT_STATE]
+
+    @property
+    def safe_alerts(self) -> list[Alert]:
+        return [a for a in self.alerter.alerts if a.state != ALERT_STATE]
+
+
+def make_system(cell: SimCell) -> System:
+    ctrl, alerter = make_controller(cell)
+    watchman = Watchman(cell.cfg, cell.clock, cell.sensors, cell.cnc, ctrl.request_safe, alerter)
+    return System(ctrl, watchman, alerter)
+
+
+def stop_source(reason: str) -> str:
+    """Who stopped the cell, for the false-stop report."""
+    return "Watchman" if reason.startswith("requested: watchman") else "CellController"
+
+
+class ControllerRunner:
+    """One cycle of a CellController (and its watchman, ticked first each step).
+
+    done = back in IDLE with one more cycle; stopped = SAFE.
+    """
+
+    def __init__(self, ctrl: CellController, watchman: Watchman | None = None) -> None:
         self.ctrl = ctrl
+        self.watchman = watchman
         self._start = ctrl.cycles_completed
         ctrl.start_cycle()
 
@@ -132,20 +166,24 @@ class ControllerRunner:
         return self.ctrl.last_safe_reason
 
     def step(self) -> bool:
+        if self.watchman is not None:
+            self.watchman.tick()
         self.ctrl.step()
         return not (self.done or self.stopped)
 
 
-def controller_runners() -> Callable[[SimCell], Runner]:
-    """Runner factory for run_cycles(): one controller per cell, kept across cycles."""
-    ctrls: dict[int, CellController] = {}
+def system_runners() -> tuple[Callable[[SimCell], Runner], dict[int, System]]:
+    """Runner factory for run_cycles(): one controller + watchman per cell, kept across
+    cycles. Also returns the systems so callers can inspect alerts."""
+    systems: dict[int, System] = {}
 
     def new(cell: SimCell) -> Runner:
-        if id(cell) not in ctrls:
-            ctrls[id(cell)] = make_controller(cell)[0]
-        return ControllerRunner(ctrls[id(cell)])
+        if id(cell) not in systems:
+            systems[id(cell)] = make_system(cell)
+        s = systems[id(cell)]
+        return ControllerRunner(s.ctrl, s.watchman)
 
-    return new
+    return new, systems
 
 
 @dataclass(frozen=True)
@@ -175,7 +213,7 @@ def no_fault_variations() -> st.SearchStrategy[NoFaultVariation]:
 
 
 def cell_for(v: NoFaultVariation) -> SimCell:
-    cfg = make_cfg(v.no_release_sensor)
+    cfg = make_cfg(v.no_release_sensor, v.cycle_s)
     p = cfg.io_plausibility
     return build_sim_cell(
         cfg,
