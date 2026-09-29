@@ -1,0 +1,11 @@
+# Hub telemetry settings. Copy to the hub and edit. The token goes in the hub's .env
+# (NIGHTSHIFT_TELEMETRY_TOKEN=...), never in this file.
+telemetry:
+  endpoint: https://api.nightshift.example/v1/events  # placeholder until the cloud exists (W5)
+  token_env: NIGHTSHIFT_TELEMETRY_TOKEN
+  queue_path: data/telemetry/queue.db
+  batch_size: 500
+  backoff_initial_s: 2
+  backoff_max_s: 300
+  # 10 Hz features x 5 machines ~ 4.3M rows/day; cap bulk at ~2 days on the hub SSD.
+  max_bulk_events: 9000000
