@@ -351,3 +351,18 @@ def test_reset_never_unlatches_robot_unless_arm_is_outside(
     assert ctrl.reset("asha") is not None
     assert calls == []  # the robot was never unlatched
     assert cell.robot.status() is RobotStatus.STOPPED
+
+
+def test_feed_hold_pressed_mid_cut_goes_safe_at_once() -> None:
+    cell = new_cell()
+    ctrl, alerter = make(cell)
+    assert ctrl.start_cycle()
+    run_one_cycle_until(cell, ctrl, S.MACHINING)
+    for _ in range(30):  # 3 s into the cut
+        ctrl.step()
+        cell.clock.advance(0.1)
+    assert cell.cnc.cycle_running() and ctrl.state is S.MACHINING
+    cell.cnc.feed_hold()  # operator presses feed hold on the machine panel
+    ctrl.step()
+    assert ctrl.state.value == S.SAFE.value  # (.value: mypy keeps the narrowing above)
+    assert "feed hold during machining" in alerter.alerts[0].reason
