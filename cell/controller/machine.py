@@ -44,6 +44,8 @@ class Ctx:
     robot: Robot
     gripper: Gripper
     cnc: CncIo
+    # True once the worst-case stroke time has passed since the last command on a pair.
+    stroke_done: Callable[[str], bool]
 
 
 # --- steps: the fixed sequence inside one state ---
@@ -168,6 +170,7 @@ def _open_door_steps(_: CellConfig) -> tuple[Step, ...]:
     return (
         Command("open door", lambda c: c.cnc.open_door()),
         WaitUntil("door open", _door_open_confirmed),
+        WaitUntil("door worst-case stroke time", lambda c: c.stroke_done("door")),
     )
 
 
@@ -240,6 +243,7 @@ STATE_TABLE: dict[State, StateSpec] = {
             WaitUntil("part seated in fixture", lambda c: c.cnc.part_present()),
             Command("clamp", lambda c: c.cnc.clamp()),
             WaitUntil("clamped", _clamp_confirmed),
+            WaitUntil("clamp worst-case stroke time", lambda c: c.stroke_done("clamp")),
             Command("gripper open", lambda c: c.gripper.open()),
             WaitUntil("gripper open", lambda c: c.gripper.is_open()),
         ),
@@ -301,6 +305,7 @@ STATE_TABLE: dict[State, StateSpec] = {
         _fixed(
             Command("unclamp", lambda c: c.cnc.unclamp()),
             WaitUntil("unclamp confirmed", lambda c: c.cnc.unclamped() and not c.cnc.clamped()),
+            WaitUntil("unclamp worst-case stroke time", lambda c: c.stroke_done("clamp")),
             Move("above_fixture"),
         ),
         _INSIDE,
@@ -368,8 +373,11 @@ class CellController:
         self._clock = clock
         self._safety = safety
         self._alerter = alerter
-        self._ctx = Ctx(cfg, robot, gripper, cnc)
         self._plausibility = IoPlausibilityMonitor(cnc, clock, cfg)
+        # Door/clamp commands go through the monitor's wrapper so it knows what was asked.
+        self._ctx = Ctx(
+            cfg, robot, gripper, self._plausibility.cnc, self._plausibility.stroke_time_elapsed
+        )
         self.state = State.IDLE
         self.cycles_completed = 0
         self.last_safe_reason = ""
@@ -437,20 +445,23 @@ class CellController:
             blockers.append("CNC alarm not cleared")
         if c.cnc.feed_hold_active():
             blockers.append("feed hold not cleared at the machine")
+        if not (c.cnc.door_closed() and not c.cnc.door_open()):
+            blockers.append("door not confirmed closed")
+        # The person has checked the cell: accept current readings as the new baseline.
+        self._plausibility.rebaseline()
         faults = self._plausibility.check()
         if faults:
             blockers.append(f"sensor plausibility: {[f.value for f in faults]}")
+        # Check where the arm is BEFORE unlatching it: never release a robot that is
+        # inside the machine or at an unknown position.
+        where = arm_outside_machine(c)
+        if where is not None:
+            blockers.append(where)
         if not blockers:
-            # Check where the arm is BEFORE unlatching it: never release a robot that is
-            # inside the machine or at an unknown position.
-            where = arm_outside_machine(c)
-            if where is not None:
-                blockers.append(where)
-            else:
-                c.robot.reset()
-                if c.robot.status() is not RobotStatus.IDLE:
-                    blockers.append(f"robot not ready ({c.robot.status().value})")
-                    c.robot.stop()  # re-latch the robot while we stay in SAFE
+            c.robot.reset()  # only now, with every check passed, unlatch the robot
+            if c.robot.status() is not RobotStatus.IDLE:
+                blockers.append(f"robot not ready ({c.robot.status().value})")
+                c.robot.stop()  # re-latch the robot while we stay in SAFE
         if blockers:
             reason = "; ".join(blockers)
             log.info(
@@ -543,6 +554,9 @@ class CellController:
             return c.robot.at_pose() == step.pose
         if isinstance(step, Command):
             step.fn(c)
+            # A command can itself reveal a fault (e.g. plausibility rule d). Check now,
+            # before any later step in this same tick acts on the result.
+            self._cell_checks()
             return True
         if isinstance(step, WaitUntil):
             return step.cond(c)

@@ -31,6 +31,10 @@ class CncFault(Enum):
     IO_POWER_LOSS = "io_power_loss"  # I/O loses power: every wire reads de-energised
     # Door starts closing on its own: operator hits the door button, or air pressure drops.
     DOOR_CLOSES_UNCOMMANDED = "door_closes_uncommanded"
+    # Stuck-on + dead sensor pairs: readings look perfectly consistent but are wrong.
+    DOOR_SENSORS_STUCK_OPEN = "door_sensors_stuck_open"  # open stuck on, closed dead
+    DOOR_SENSORS_STUCK_CLOSED = "door_sensors_stuck_closed"  # closed stuck on, open dead
+    CLAMP_SENSORS_STUCK_CLAMPED = "clamp_sensors_stuck_clamped"  # clamped on, released dead
     # Part sits crooked in the fixture: the one there now, or the next one placed.
     PART_MISSEATED = "part_misseated"
 
@@ -135,6 +139,8 @@ class SimCnc:
     def _move_door(self, to_open: bool) -> None:
         if self._door_frozen is not None:
             return
+        if self.door() == ("open" if to_open else "closed"):
+            return  # already there: a real door does not move
         self._door_target_open = to_open
         self._door_done_at = self._clock.now() + self._door_s
         if self._door_stick_next:
@@ -185,23 +191,31 @@ class SimCnc:
         return CncFault.IO_POWER_LOSS not in self._sensor_faults
 
     def door_open(self) -> bool:
-        if not self._powered:
+        if not self._powered or CncFault.DOOR_SENSORS_STUCK_CLOSED in self._sensor_faults:
             return False
+        if CncFault.DOOR_SENSORS_STUCK_OPEN in self._sensor_faults:
+            return True
         return CncFault.DOOR_SENSOR_SHORT in self._sensor_faults or self.door() == "open"
 
     def door_closed(self) -> bool:
-        if not self._powered:
+        if not self._powered or CncFault.DOOR_SENSORS_STUCK_OPEN in self._sensor_faults:
             return False
+        if CncFault.DOOR_SENSORS_STUCK_CLOSED in self._sensor_faults:
+            return True
         return CncFault.DOOR_SENSOR_SHORT in self._sensor_faults or self.door() == "closed"
 
     def clamped(self) -> bool:
         if not self._powered:
             return False
+        if CncFault.CLAMP_SENSORS_STUCK_CLAMPED in self._sensor_faults:
+            return True
         return CncFault.CLAMP_SENSOR_SHORT in self._sensor_faults or self.jaws() == "closed"
 
     def unclamped(self) -> bool:
         # No sensor fitted: never reads as released (fail-safe; see CncIo.unclamped).
         if not self._has_released_sensor or not self._powered:
+            return False
+        if CncFault.CLAMP_SENSORS_STUCK_CLAMPED in self._sensor_faults:
             return False
         return CncFault.CLAMP_SENSOR_SHORT in self._sensor_faults or self.jaws() == "open"
 

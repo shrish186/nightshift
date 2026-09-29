@@ -76,6 +76,8 @@ def _door_open_only(c: Ctx) -> str | None:  # a weaker guard: trusts door_open a
 
 
 def m_no_inside_guard(mp: pytest.MonkeyPatch, ctrl: CellController) -> None:
+    # Both layers off: the LOAD guard and the command-aware plausibility check (rule c).
+    m_plausibility_off(mp, ctrl)
     _set(mp, S.LOAD, guards=())
 
 
@@ -185,7 +187,10 @@ BROKEN = {
         m_start_with_arm_inside, (), "cycle start with arm in machine"
     ),
     "pull-stuck-clamp-without-check": Broken(
-        m_no_unclamp_wait, (FaultEvent(0, CncFault.CLAMP_STUCK_ON),), "while still clamped"
+        m_no_unclamp_wait,
+        (),
+        "while still clamped",
+        at_state=(S.MACHINING, CncFault.CLAMP_STUCK_ON),
     ),
     "cut-a-crooked-part": Broken(
         m_no_seat_checks,
@@ -293,3 +298,15 @@ def test_random_faults_never_cause_unsafe_events(
             RobotStatus.FORCE_LIMIT,
         )
         assert len(system.safe_alerts) == 1
+
+
+def test_inside_guard_catches_door_closing_when_plausibility_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Defense in depth: the LOAD guard alone still stops the arm going deeper."""
+    cell = new_cell()
+    ctrl, _ = make_controller(cell)
+    m_plausibility_off(monkeypatch, ctrl)
+    _run_cycle(cell, ctrl, (), (S.LOAD, CncFault.DOOR_CLOSES_UNCOMMANDED))
+    assert cell.violations == []
+    assert "guard arm_may_be_inside" in ctrl.last_safe_reason

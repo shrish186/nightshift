@@ -68,6 +68,10 @@ def build_sim_cell(
 
     def released() -> None:
         if robot.at_pose() == "load":
+            if cnc.jaws() != "closed":
+                cell.robot_violations.append(
+                    f"t={clock.now():.2f} part released before the clamp closed"
+                )
             cnc.place_part()
 
     def gripped() -> None:

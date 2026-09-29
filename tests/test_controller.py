@@ -392,3 +392,42 @@ def test_unknown_program_is_refused() -> None:
     assert not ctrl.start_cycle("NOPE")
     ctrl.step()
     assert ctrl.state is S.IDLE and ctrl.history == []
+
+
+# --- command-aware plausibility, mid-stroke (rule a) ---
+
+
+@pytest.mark.parametrize(
+    ("state", "fault", "expect"),
+    [
+        (S.OPEN_DOOR_LOAD, CncFault.DOOR_SENSORS_STUCK_OPEN, "door_confirmed_too_fast"),
+        (S.CLAMP, CncFault.CLAMP_SENSORS_STUCK_CLAMPED, "clamp_confirmed_too_fast"),
+    ],
+)
+def test_stuck_on_dead_pair_mid_stroke_is_caught_before_the_arm_acts(
+    state: State, fault: CncFault, expect: str
+) -> None:
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    assert ctrl.start_cycle(PROGRAM)
+    run_one_cycle_until(cell, ctrl, state)
+    for _ in range(3):  # the command goes out and the stroke starts
+        ctrl.step()
+        cell.clock.advance(0.05)
+    cell.cnc.inject(fault)
+    ctrl.step()
+    assert ctrl.state.value == S.SAFE.value, ctrl.last_safe_reason
+    assert expect in ctrl.last_safe_reason
+    assert cell.violations == []
+
+
+def test_fault_revealed_by_a_command_stops_before_the_next_step() -> None:
+    """No released sensor + shorted clamped sensor: 'clamped' already reads True when the
+    clamp is commanded. The gripper must not let go of the part in that same tick."""
+    cell = new_cell(no_release_sensor=True)
+    ctrl, _ = make(cell)
+    cell.cnc.inject(CncFault.CLAMP_SENSOR_SHORT)
+    run_one_cycle(cell, ctrl)
+    assert ctrl.state is S.SAFE
+    assert "clamp_confirmed_without_travel" in ctrl.last_safe_reason
+    assert cell.violations == []

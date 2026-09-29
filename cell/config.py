@@ -97,6 +97,13 @@ class IoPlausibility(_Strict):
     door_plausibility_window_s: float = Field(gt=0)
     clamp_travel_s: float = Field(gt=0)
     clamp_plausibility_window_s: float = Field(gt=0)
+    # A commanded stroke that confirms faster than this fraction of measured travel is a
+    # stuck-on sensor, not a real stroke.
+    min_travel_fraction: float = Field(gt=0, lt=1)
+    # After a stroke confirms, the arm still waits until max_travel_fraction x measured
+    # travel has passed since the command before acting on it, so even a sensor that
+    # sticks on late in a stroke cannot let the arm move before the stroke could finish.
+    max_travel_fraction: float = Field(gt=1)
 
     @model_validator(mode="after")
     def _window_exceeds_travel(self) -> IoPlausibility:

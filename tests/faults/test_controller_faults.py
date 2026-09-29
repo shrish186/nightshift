@@ -66,7 +66,8 @@ CASES = {
     "guard-opened": Case(S.LOAD, lambda c, _: c.safety.open_guard(), "guard open"),
     "door-wont-open": Case(S.PICK_RAW, cnc(CncFault.DOOR_STUCK), "door_both_off_too_long"),
     "door-wont-close": Case(S.RETREAT, cnc(CncFault.DOOR_STUCK), "door_both_off_too_long"),
-    "clamp-timeout": Case(S.LOAD, cnc(CncFault.CLAMP_FAIL), "CLAMP timeout"),
+    # Jaws never close: the released sensor never clears (rule b), well before the timeout.
+    "clamp-never-closes": Case(S.LOAD, cnc(CncFault.CLAMP_FAIL), "clamp_origin_stuck"),
     "empty-grip-at-pick": Case(S.PICK_RAW, gripper(GripperFault.EMPTY_GRIP), "raw part"),
     "empty-grip-at-unload": Case(
         S.MACHINING, gripper(GripperFault.EMPTY_GRIP), "finished part in gripper"
@@ -80,13 +81,13 @@ CASES = {
     "clamp-sensor-short": Case(S.MACHINING, cnc(CncFault.CLAMP_SENSOR_SHORT), "clamp_both_on"),
     "io-power-loss": Case(S.RETREAT, cnc(CncFault.IO_POWER_LOSS), "CNC alarm"),
     "clamp-stuck-on-with-sensor": Case(
-        S.MACHINING, cnc(CncFault.CLAMP_STUCK_ON), "UNCLAMP timeout"
+        S.MACHINING, cnc(CncFault.CLAMP_STUCK_ON), "clamp_origin_stuck"
     ),
     "clamp-stuck-on-no-sensor": Case(
         S.MACHINING, cnc(CncFault.CLAMP_STUCK_ON), "robot force_limit", no_release_sensor=True
     ),
     "door-closes-while-arm-inside": Case(
-        S.LOAD, cnc(CncFault.DOOR_CLOSES_UNCOMMANDED), "guard arm_may_be_inside"
+        S.LOAD, cnc(CncFault.DOOR_CLOSES_UNCOMMANDED), "door_uncommanded_change"
     ),
     "part-misseated": Case(
         S.PICK_RAW, cnc(CncFault.PART_MISSEATED), "CLAMP timeout: part seated in fixture"
@@ -104,6 +105,19 @@ CASES = {
     ),
     "feed-hold-before-cycle-start": Case(
         S.MACHINING, lambda c, _: c.cnc.feed_hold(), "feed hold during machining"
+    ),
+    # Injected on entry, before the open command: the readings jump uncommanded.
+    "door-sensors-stuck-open-before-open": Case(
+        S.OPEN_DOOR_LOAD, cnc(CncFault.DOOR_SENSORS_STUCK_OPEN), "door_uncommanded_change"
+    ),
+    "door-sensors-stuck-open-at-rest": Case(
+        S.MACHINING, cnc(CncFault.DOOR_SENSORS_STUCK_OPEN), "door_uncommanded_change"
+    ),
+    "door-sensors-stuck-closed": Case(
+        S.MACHINING, cnc(CncFault.DOOR_SENSORS_STUCK_CLOSED), "door_origin_stuck"
+    ),
+    "clamp-sensors-stuck-clamped-before-clamp": Case(
+        S.CLAMP, cnc(CncFault.CLAMP_SENSORS_STUCK_CLAMPED), "clamp_uncommanded_change"
     ),
     "watchman-request": Case(
         S.MACHINING, lambda _, ctrl: ctrl.request_safe("watchman: tool break"), "watchman"
@@ -134,7 +148,9 @@ def test_every_fault_type_is_covered() -> None:
     """New sim faults must get a controller test (sensor faults are the watchman's)."""
     covered = {"DOOR_STUCK", "CLAMP_FAIL", "ALARM", "CYCLE_HANG", "CLAMP_STUCK_ON",
                "DOOR_SENSOR_SHORT", "CLAMP_SENSOR_SHORT", "IO_POWER_LOSS", "FAULT", "STALL",
-               "EMPTY_GRIP", "DROP", "DOOR_CLOSES_UNCOMMANDED", "PART_MISSEATED"}  # fmt: skip
+               "EMPTY_GRIP", "DROP", "DOOR_CLOSES_UNCOMMANDED", "PART_MISSEATED",
+               "DOOR_SENSORS_STUCK_OPEN", "DOOR_SENSORS_STUCK_CLOSED",
+               "CLAMP_SENSORS_STUCK_CLAMPED"}  # fmt: skip
     all_faults = {f.name for f in (*CncFault, *RobotFault, *GripperFault)}
     # CLAMP_JAM and gripper STUCK are exercised by the random fault tests.
     assert all_faults - covered == {"CLAMP_JAM", "STUCK"}
