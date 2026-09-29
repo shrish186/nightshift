@@ -3,7 +3,9 @@
 SAFETY-RELEVANT: changes here need human review.
 
 Graded responses:
-  STOP  : TOOL_BREAK, OVERLOAD (current or vibration), STALE sensor data.
+  STOP  : TOOL_BREAK, OVERLOAD (current or vibration).
+  ALERT : STALE sensor data (watchman unhealthy: blocks new unattended work, the cut
+          in progress continues).
   ALERT : CHIP_BUILDUP (load climbing within one cut) and TOOL_WEAR (load climbing
           cycle over cycle), escalating to STOP only past their separate hard ratios.
 
@@ -97,8 +99,11 @@ class Detector:
             self._last_ts = frame.ts
         age = now - (self._last_ts if self._last_ts is not None else self._start)
         if age >= self._cfg.stale_after_s - _EPS:
+            # Not a stop: a dead/offline node makes the watchman unhealthy (it can't
+            # watch), which blocks unattended starts and loading. The cut in progress
+            # finishes (founder decision 2026-09-29).
             return [
-                Finding(FindingKind.STALE, Severity.STOP, f"no fresh sensor data for {age:.2f}s")
+                Finding(FindingKind.STALE, Severity.ALERT, f"no fresh sensor data for {age:.2f}s")
             ]
         if not fresh or frame is None:
             return out

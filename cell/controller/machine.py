@@ -50,6 +50,8 @@ class Ctx:
     # Debounced fixture seat sensor (see presence.py).
     part_seated: Callable[[], bool]
     fixture_empty: Callable[[], bool]
+    # True if this cycle is supervised, or the watchman is attached and healthy.
+    watchman_ready: Callable[[], bool]
 
 
 # --- steps: the fixed sequence inside one state ---
@@ -252,6 +254,18 @@ STATE_TABLE: dict[State, StateSpec] = {
         ),
         (),
         lambda cfg, p: cfg.timeouts_s.pick_raw,
+        _goto(State.WAIT_WATCHMAN),
+    ),
+    State.WAIT_WATCHMAN: _spec(
+        _fixed(
+            WaitUntil(
+                "watchman healthy",
+                lambda c: c.watchman_ready(),
+                within=lambda cfg: cfg.timeouts_s.watchman_wait_s,
+            )
+        ),
+        (),
+        lambda cfg, p: cfg.timeouts_s.watchman_wait_s + 5,
         _goto(State.OPEN_DOOR_LOAD),
     ),
     State.OPEN_DOOR_LOAD: _spec(
@@ -432,6 +446,7 @@ class CellController:
             self._plausibility.stroke_time_elapsed,
             presence.seated,
             presence.empty_confirmed,
+            lambda: self.supervised or self.watchman_health() is None,
         )
         self.state = State.IDLE
         self.cycles_completed = 0

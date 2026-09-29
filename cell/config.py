@@ -104,6 +104,9 @@ class Timeouts(_Strict):
     retreat: float = Field(gt=0)
     # MACHINING timeout = active program's expected_cycle_s x machining_factor.
     machining_factor: float = Field(gt=1)
+    # Max time the arm holds a raw part outside the machine waiting for an unhealthy
+    # watchman (node offline) before going SAFE.
+    watchman_wait_s: float = Field(gt=0)
     unclamp: float = Field(gt=0)
     unload: float = Field(gt=0)
     place_done: float = Field(gt=0)

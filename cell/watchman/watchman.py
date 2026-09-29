@@ -6,7 +6,9 @@ waits for the controller to act on a STOP finding:
   2. then request_safe() so the controller goes to SAFE and stops the arm,
   3. then it latches until a human reset().
 ALERT findings are sent to the alerter, at most once per kind per cut.
-Any error inside the watchman itself is treated as a STOP (it can no longer watch).
+Stale sensor data or an error inside the watchman makes it UNHEALTHY (alert, and
+health() reports it): no new unattended work starts or loads, the cut in progress
+finishes. A node failure never stops the machine by itself.
 """
 
 from __future__ import annotations
@@ -67,6 +69,7 @@ class Watchman:
         self._last_complete: tuple[int, CycleStats] | None = None
         self._confirmed_cuts: set[int] = set()
         self._recording: _Recording | None = None
+        self._error: str | None = None
 
     def tick(self) -> list[Finding]:
         now = self._clock.now()
@@ -76,6 +79,7 @@ class Watchman:
             if cutting and not self._was_cutting:
                 self._cut += 1
             self._was_cutting = cutting
+            self._error = None
             done_before = self._detector.cuts_completed
             findings = self._detector.update(frame, now, cutting)
             if findings:
@@ -83,11 +87,8 @@ class Watchman:
             if self._detector.cuts_completed > done_before and self._detector.last_cut:
                 self._last_complete = (self._cut, self._detector.last_cut)
         except Exception as e:
-            findings = [
-                Finding(
-                    FindingKind.STALE, Severity.STOP, f"watchman error: {type(e).__name__}: {e}"
-                )
-            ]
+            self._error = f"watchman error: {type(e).__name__}: {e}"
+            findings = [Finding(FindingKind.STALE, Severity.ALERT, self._error)]
         for f in findings:
             if f.severity is Severity.STOP:
                 self._stop(f, now)
@@ -189,6 +190,8 @@ class Watchman:
         """For the controller's reset(): None if the watchman can watch, else why not."""
         if self.stopped:
             return f"watchman stop latched ({self.stop_reason}): reset the watchman first"
+        if self._error is not None:
+            return self._error
         try:
             frame = self._sensors.read()
         except Exception as e:

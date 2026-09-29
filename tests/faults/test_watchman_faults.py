@@ -10,7 +10,14 @@ from cell.controller.states import State
 from cell.drivers.sim.cell import SimCell
 from cell.drivers.sim.sensors import SensorFault
 from cell.watchman.watchman import Watchman
-from tests.faults.harness import ControllerRunner, System, make_system, new_cell, run_with_faults
+from tests.faults.harness import (
+    PROGRAM,
+    ControllerRunner,
+    System,
+    make_system,
+    new_cell,
+    run_with_faults,
+)
 
 S = State
 
@@ -54,8 +61,6 @@ def assert_watchman_safe(cell: SimCell, system: System, kind: str) -> None:
     [
         (SensorFault.TOOL_BREAK, S.MACHINING, 4.0, "tool_break"),  # breaks mid-cut
         (SensorFault.JAM, S.MACHINING, 2.0, "overload"),
-        (SensorFault.STALE, S.PICK_RAW, 0.0, "stale"),
-        (SensorFault.DEAD, S.LOAD, 0.0, "stale"),
     ],
 )
 def test_stop_faults_end_safe_via_watchman(
@@ -75,15 +80,80 @@ def test_tool_already_broken_at_cut_start_stops() -> None:
     assert_watchman_safe(cell, system, "tool_break")
 
 
-def test_dead_sensor_stops_an_idle_cell() -> None:
-    cell = new_cell()
-    system = make_system(cell)
-    cell.sensors.inject(SensorFault.DEAD)
-    for _ in range(20):
+# --- node offline / stale data: "watchman unhealthy", never a stop by itself ---
+
+
+def _tick(cell: SimCell, system: System, seconds: float) -> None:
+    for _ in range(round(seconds / 0.1)):
         system.watchman.tick()
         system.ctrl.step()
         cell.clock.advance(0.1)
-    assert_watchman_safe(cell, system, "stale")
+
+
+@pytest.mark.parametrize("fault", [SensorFault.DEAD, SensorFault.STALE])
+def test_dead_sensor_on_an_idle_cell_alerts_and_blocks_unattended_start(
+    fault: SensorFault,
+) -> None:
+    cell = new_cell()
+    system = make_system(cell)
+    cell.sensors.inject(fault)
+    _tick(cell, system, 2)
+    assert system.ctrl.state is S.IDLE  # no SAFE: the machine isn't stopped for this
+    assert any("stale" in a.reason for a in system.watchman_alerts)
+    assert not system.ctrl.start_cycle(PROGRAM)
+    assert "no fresh sensor data" in system.ctrl.last_start_refusal
+    assert system.ctrl.start_cycle(PROGRAM, supervised=True)  # supervised still allowed
+
+
+def test_node_drops_out_mid_cut_cycle_finishes_then_next_start_refused() -> None:
+    cell = new_cell()
+    system = make_system(cell)
+    runner = run_cycle(cell, system, S.MACHINING, SensorFault.DEAD, 2.0)
+    assert runner.done, system.ctrl.last_safe_reason  # the cut finished, part unloaded
+    assert not cell.cnc.feed_hold_active()
+    assert cell.violations == []
+    assert not system.ctrl.start_cycle(PROGRAM)
+
+
+def state(system: System) -> State:
+    return system.ctrl.state  # (a function, so mypy doesn't narrow across steps)
+
+
+def test_node_drops_out_before_load_arm_waits_then_continues() -> None:
+    cell = new_cell()
+    system = make_system(cell)
+    ctrl = system.ctrl
+    assert ctrl.start_cycle(PROGRAM)
+    _tick(cell, system, 0.3)
+    assert state(system) is S.PICK_RAW
+    cell.sensors.inject(SensorFault.DEAD)  # node drops out while the arm picks the part
+    _tick(cell, system, 8)
+    assert state(system) is S.WAIT_WATCHMAN
+    assert not cell.robot.occupies(cell.cfg.machine_zone_poses)  # never loaded
+    assert cell.gripper.has_part()
+    cell.sensors.clear(SensorFault.DEAD)  # the node comes back
+    for _ in range(3000):
+        _tick(cell, system, 0.1)
+        if state(system) is S.IDLE:
+            break
+    assert state(system) is S.IDLE and ctrl.cycles_completed == 1
+    assert cell.violations == []
+
+
+def test_node_stays_offline_past_the_bound_goes_safe_with_arm_outside() -> None:
+    cell = new_cell()
+    system = make_system(cell)
+    ctrl = system.ctrl
+    assert ctrl.start_cycle(PROGRAM)
+    _tick(cell, system, 0.3)
+    cell.sensors.inject(SensorFault.DEAD)
+    _tick(cell, system, 8)
+    assert state(system) is S.WAIT_WATCHMAN
+    _tick(cell, system, cell.cfg.timeouts_s.watchman_wait_s + 2)
+    assert state(system) is S.SAFE
+    assert "watchman healthy not within" in ctrl.last_safe_reason
+    assert not cell.robot.occupies(cell.cfg.machine_zone_poses)
+    assert cell.violations == []
 
 
 def test_chip_buildup_short_cut_alerts_but_finishes() -> None:
@@ -146,7 +216,7 @@ def test_watchman_holds_the_machine_without_the_controller() -> None:
     assert len(requests) == 1 and requests[0].startswith("watchman: tool_break")
 
 
-def test_watchman_error_is_a_stop(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_watchman_error_makes_it_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
     cell = new_cell()
     system = make_system(cell)
 
@@ -154,10 +224,10 @@ def test_watchman_error_is_a_stop(monkeypatch: pytest.MonkeyPatch) -> None:
         raise OSError("sensor bus")
 
     monkeypatch.setattr(cell.sensors, "read", broken_read)
-    system.watchman.tick()
-    system.ctrl.step()
-    assert_watchman_safe(cell, system, "stale")
-    assert "watchman error: OSError" in system.ctrl.last_safe_reason
+    _tick(cell, system, 1)
+    assert system.ctrl.state is S.IDLE
+    assert any("watchman error: OSError" in a.reason for a in system.watchman_alerts)
+    assert not system.ctrl.start_cycle(PROGRAM)
 
 
 # --- reset refused while the watchman is unhealthy ---

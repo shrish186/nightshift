@@ -44,6 +44,7 @@ timeouts_s:
   clamp: 5
   retreat: 15
   machining_factor: 1.5  # MACHINING timeout = program expected_cycle_s x this
+  watchman_wait_s: 120  # arm waits outside with the raw part for the watchman, then SAFE
   unclamp: 5
   unload: 20
   place_done: 20
@@ -102,5 +103,8 @@ watchman:
   # reference_cycles cycles confirmed clean). Alert limits derive from their spread.
   reference_cycles: 5
   derived_limit_sigmas: 4.0
-  derived_min_margin: 0.12
+  # Must cover cycle-to-cycle load variation relative to a mean of only
+  # reference_cycles cycles. The sim varies load up to +/-8%, so a clean cycle can reach
+  # ~x1.13 of a low-side reference; 0.12 produced a false wear alert. SET FROM M1 DATA.
+  derived_min_margin: 0.15
   reference_store: data/references/sim-01.json

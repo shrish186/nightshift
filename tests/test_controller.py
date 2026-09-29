@@ -22,6 +22,7 @@ S = State
 NORMAL_CYCLE_WITH_SENSOR = [
     S.IDLE,
     S.PICK_RAW,
+    S.WAIT_WATCHMAN,
     S.OPEN_DOOR_LOAD,
     S.LOAD,
     S.CLAMP,
@@ -652,3 +653,14 @@ def test_unattended_start_accepted_with_healthy_watchman() -> None:
     ctrl = _bare(new_cell())
     ctrl.attach_watchman(_Link())
     assert ctrl.start_cycle(PROGRAM)
+
+
+def test_wait_watchman_passes_straight_through_when_healthy() -> None:
+    cell = new_cell()
+    ctrl, _ = make(cell)
+    run_one_cycle(cell, ctrl)
+    waits = [t for t in ctrl.history if t.src is S.WAIT_WATCHMAN]
+    assert (
+        len(waits) == 1
+        and waits[0].ts - next(t.ts for t in ctrl.history if t.dst is S.WAIT_WATCHMAN) <= 0.2
+    )

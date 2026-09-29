@@ -122,3 +122,9 @@ class SimSensors:
     # --- sim only ---
     def inject(self, fault: SensorFault) -> None:
         self._faults.setdefault(fault, self._clock.now())
+
+    def clear(self, fault: SensorFault) -> None:
+        """The fault goes away (e.g. the node comes back online)."""
+        self._faults.pop(fault, None)
+        if fault is SensorFault.STALE:
+            self._last = None

@@ -8,6 +8,9 @@ from enum import Enum
 class State(Enum):
     IDLE = "IDLE"
     PICK_RAW = "PICK_RAW"
+    # Unattended only: hold the raw part outside the machine until the watchman is
+    # healthy (e.g. its node came back online). Passes straight through when healthy.
+    WAIT_WATCHMAN = "WAIT_WATCHMAN"
     OPEN_DOOR_LOAD = "OPEN_DOOR_LOAD"
     LOAD = "LOAD"
     CLAMP = "CLAMP"

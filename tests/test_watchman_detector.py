@@ -119,26 +119,26 @@ def test_overload_stops_after_confirm(wcfg: WatchmanConfig, channel: str) -> Non
     assert (K.OVERLOAD, SEV.STOP) in kinds(f.run(1, current=over_a, vib=over_v))
 
 
-def test_stale_frame_stops(wcfg: WatchmanConfig) -> None:
+def test_stale_frame_is_flagged(wcfg: WatchmanConfig) -> None:
     f = Feed(wcfg)
     f.idle()
     frozen = f.t
     out = f.run(wcfg.stale_after_s - DT, cutting=False, frame_ts=lambda t: frozen)
     assert out == []
     out = f.run(2 * DT, cutting=False, frame_ts=lambda t: frozen)
-    assert (K.STALE, SEV.STOP) in kinds(out)
+    assert (K.STALE, SEV.ALERT) in kinds(out)
 
 
-def test_no_frames_at_all_stops_after_grace(wcfg: WatchmanConfig) -> None:
+def test_no_frames_at_all_flagged_after_grace(wcfg: WatchmanConfig) -> None:
     f = Feed(wcfg)
     assert f.run(wcfg.stale_after_s - DT, cutting=False, frame_ts=lambda t: None) == []
-    assert (K.STALE, SEV.STOP) in kinds(f.run(2 * DT, cutting=False, frame_ts=lambda t: None))
+    assert (K.STALE, SEV.ALERT) in kinds(f.run(2 * DT, cutting=False, frame_ts=lambda t: None))
 
 
-def test_stale_stops_while_idle_too(wcfg: WatchmanConfig) -> None:
+def test_stale_flagged_while_idle_too(wcfg: WatchmanConfig) -> None:
     f = Feed(wcfg)
     f.idle(5)
-    assert (K.STALE, SEV.STOP) in kinds(f.run(1, cutting=False, frame_ts=lambda t: None))
+    assert (K.STALE, SEV.ALERT) in kinds(f.run(1, cutting=False, frame_ts=lambda t: None))
 
 
 # --- graded: chip buildup (within a cycle) ---
@@ -273,7 +273,12 @@ def test_tight_reference_gives_tighter_chip_limit(wcfg: WatchmanConfig) -> None:
     f = Feed(wcfg, seed=1, reference=tight)
     f.idle()
 
-    def drift(t: float) -> float:  # ends near 1.17x: under the 1.2 config alert
-        return CUT_A * (1 + 0.17 * max(0.0, t - wcfg.cut_settle_s) / 11)
+    def drift(t: float) -> float:  # ends near 1.19x: under the 1.2 config alert
+        return CUT_A * (1 + 0.195 * max(0.0, t - wcfg.cut_settle_s) / 11)
+
+    # with no reference the fixed config ratio (1.2) applies, and it misses this drift
+    fixed = Feed(wcfg, seed=1)
+    fixed.idle()
+    assert (K.CHIP_BUILDUP, SEV.ALERT) not in kinds(fixed.run(12, current=drift))
 
     assert (K.CHIP_BUILDUP, SEV.ALERT) in kinds(f.run(12, current=drift))
