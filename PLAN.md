@@ -69,6 +69,8 @@ Cheap cobot cell vs. simple gantry loader. Ranges are placeholders until real qu
 
 ## 4. Milestones  ← current milestone lives here
 
+**Telemetry agent is done (built early, 2026-09-29):** `telemetry/`: offline SQLite queue, idempotent ids, outbound HTTPS with backoff, tested for 6 h offline / flapping network / restart mid-sync. W4 only needs to wire it into the hub; the cloud ingest endpoint (dedupe by id) comes with W5.
+
 **M0 (cell sim) is done:** controller, SAFE, watchman sim, plausibility, fault injection, sim.run demo (2026-09-29). The arm track pauses here until January.
 
 ### Watchman track to December pilots
