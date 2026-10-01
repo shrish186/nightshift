@@ -90,6 +90,11 @@ uint32_t hs_step(hs_state_t *st, uint32_t t_ms, float current_a, float vib_g,
         ev |= HS_OVERLOAD;
     }
 
+    /* Standalone (no CNC cut signal): a load collapse alone is NOT a tool break: a
+     * normal retract looks identical in the current. The hub judges collapses against
+     * the program + tool reference instead. */
+    if (cutting_hint < 0) return ev;
+
     if (elapsed(t_ms, st->cut_start) < c->settle_ms) return ev;
 
     /* --- tool break: current collapses vs. this cut's settled mean, held --- */

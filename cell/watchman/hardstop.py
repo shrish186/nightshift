@@ -164,6 +164,12 @@ class HardStop:
         if self._over(over, t_ms, c.overload_confirm_ms):
             ev |= HS_OVERLOAD
 
+        # Standalone (no CNC cut signal): a load collapse alone is NOT a tool break: a
+        # normal retract looks identical in the current. The hub judges collapses
+        # against the program + tool reference instead.
+        if cutting_hint < 0:
+            return ev
+
         if _elapsed(t_ms, self._cut_start) < c.settle_ms:
             return ev
 

@@ -144,3 +144,23 @@ def test_cnc_hint_overrides_detection(make, hcfg) -> None:  # type: ignore[no-un
     impl = make(hcfg)
     assert impl.step(0, 0.5, 0.05, False, 1) & HS_CUT_START  # cutting at once, low current
     assert impl.step(100, 30.0, 0.8, False, 0) & HS_CUT_END
+
+
+@pytest.mark.parametrize("after", ["3", "1.5", "0"])
+def test_standalone_load_collapse_is_never_a_tool_break(make, hcfg, after: str) -> None:  # type: ignore[no-untyped-def]
+    """Bug found 2026-10: a normal cut end fired TOOL_BREAK at +300 ms in standalone mode."""
+    m = feed(make(hcfg), edge(hcfg, f"edge-standalone-cut-end-{after}A"))
+    assert not any_bit(m, HS_TOOL_BREAK)
+    assert any_bit(m, HS_CUT_START)
+
+
+def test_overload_still_fires_in_standalone_mode(make, hcfg) -> None:  # type: ignore[no-untyped-def]
+    impl = make(hcfg)
+    t, seen = 0, 0
+    for _ in range(30):
+        seen |= impl.step(t, 12.0, 0.8, False, -1)
+        t += 100
+    for _ in range(10):
+        seen |= impl.step(t, 30.0, 0.8, False, -1)
+        t += 100
+    assert seen & HS_OVERLOAD and not seen & HS_TOOL_BREAK

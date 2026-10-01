@@ -87,9 +87,11 @@ def sim_streams() -> list[Stream]:
 # --- edge ---
 
 
-def _cut(s: Stream, t: int, ms: int, a: float, v: float = 0.8, step: int = 100) -> int:
+def _cut(
+    s: Stream, t: int, ms: int, a: float, v: float = 0.8, step: int = 100, hint: int = -1
+) -> int:
     for k in range(0, ms, step):
-        s.add(t + k, a, v)
+        s.add(t + k, a, v, hint=hint)
     return t + ms
 
 
@@ -147,18 +149,18 @@ def edge_streams(c: HardStopConfig) -> list[Stream]:
     # the mean, so the limit only drops); 1 ULP below a steady mean fires after confirm.
     limit = float(f32(f32(c.break_ratio) * f32(12.0)))
     s = Stream("edge-tool-break-at-limit")
-    t = _cut(s, 0, c.settle_ms + 2000, 12.0)
-    _cut(s, t, c.break_confirm_ms + 1000, limit)
+    t = _cut(s, 0, c.settle_ms + 2000, 12.0, hint=1)
+    _cut(s, t, c.break_confirm_ms + 1000, limit, hint=1)
     out.append(s)
     s = Stream("edge-tool-break-below")
-    t = _cut(s, 0, c.settle_ms + 2000, 12.0)
-    _cut(s, t, c.break_confirm_ms + 300, down(limit))
+    t = _cut(s, 0, c.settle_ms + 2000, 12.0, hint=1)
+    _cut(s, t, c.break_confirm_ms + 300, down(limit), hint=1)
     out.append(s)
 
     # tool break during settle is ignored; mean needs min_settled samples.
     s = Stream("edge-break-during-settle")
-    t = _cut(s, 0, 400, 12.0)
-    _cut(s, t, c.settle_ms + 1000, 3.0)
+    t = _cut(s, 0, 400, 12.0, hint=1)
+    _cut(s, t, c.settle_ms + 1000, 3.0, hint=1)
     out.append(s)
 
     # cut ends while a tool-break confirm is pending (CNC hint drops).
@@ -193,9 +195,17 @@ def edge_streams(c: HardStopConfig) -> list[Stream]:
     # millisecond counter wraps during a tool-break confirm window.
     s = Stream("edge-wraparound")
     t0 = WRAP - c.settle_ms - 2000
-    t = _cut(s, t0, c.settle_ms + 1800, 12.0)
-    _cut(s, t, c.break_confirm_ms + 400, 1.0)
+    t = _cut(s, t0, c.settle_ms + 1800, 12.0, hint=1)
+    _cut(s, t, c.break_confirm_ms + 400, 1.0, hint=1)
     out.append(s)
+
+    # Founder's repro (2026-10): standalone (no CNC signal), a normal cut end. Load
+    # collapse alone must NEVER be a tool break on the node.
+    for after in (3.0, 1.5, 0.0):
+        s = Stream(f"edge-standalone-cut-end-{after:g}A")
+        t = _cut(s, 0, 15_000, 12.0)
+        _cut(s, t, 4000, after, v=0.3)
+        out.append(s)
     return out
 
 

@@ -21,7 +21,7 @@
 #define HS_CUT_START    (1u << 0)
 #define HS_CUT_END      (1u << 1)
 #define HS_OVERLOAD     (1u << 2)
-#define HS_TOOL_BREAK   (1u << 3)
+#define HS_TOOL_BREAK   (1u << 3)  /* only with a CNC cut signal (cutting_hint >= 0) */
 #define HS_SENSOR_FAULT (1u << 4)
 
 typedef struct {
@@ -57,8 +57,10 @@ void hs_init(hs_state_t *st, const hs_config_t *cfg);
  *   current_a, vib_g : RMS features; NaN, inf or negative -> HS_SENSOR_FAULT at once,
  *                      and no other rule runs on that step.
  *   clipped          : nonzero if the current ADC saturated in this window.
- *   cutting_hint     : -1 = detect cutting from current (standalone node, no CNC I/O);
- *                      0 / 1 = the machine says whether it is cutting.
+ *   cutting_hint     : -1 = standalone: detect spindle running from current (no CNC
+ *                      I/O). HS_TOOL_BREAK is never emitted: a load collapse looks
+ *                      the same as a normal retract; the hub judges it against the
+ *                      reference. 0 / 1 = the machine says whether it is cutting.
  */
 uint32_t hs_step(hs_state_t *st, uint32_t t_ms, float current_a, float vib_g,
                  int clipped, int cutting_hint);
