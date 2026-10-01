@@ -68,6 +68,8 @@ def test_without_a_reference_load_ends_are_never_judged() -> None:
     s = make_standalone(seed=8, record=False)
     assert s.watchman.prepare("P1", supervised=True) is None
     assert s.run(s.machine.plan(break_at=0.3)) == []  # no reference: no judgement
+    assert s.alerts == []  # ...and silently so: no alert, no internal error
+    assert s.watchman.health() is None
 
 
 def test_reference_records_load_timing() -> None:
