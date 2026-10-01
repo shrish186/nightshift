@@ -51,7 +51,9 @@ class Feed:
             frame = None
             if ts is not None:
                 a = current(self.t - t0) if cutting else 1.0
-                frame = SensorFrame(ts, a + self.rng.gauss(0, noise), vib(self.t - t0), 0.5)
+                # RMS features are never negative (a negative one is a sensor fault)
+                amps = max(0.0, a + self.rng.gauss(0, noise))
+                frame = SensorFrame(ts, amps, vib(self.t - t0), 0.5)
             new += self.det.update(frame, self.t, cutting)
             self.t = round(self.t + DT, 6)
         self.findings += new

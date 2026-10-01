@@ -9,6 +9,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
+      - name: Build node hard-stop library (firmware flags, -Werror)
+        run: gcc -std=c99 -O2 -Wall -Wextra -Werror -pedantic -ffp-contract=off -c node/lib/hardstop/hardstop.c -o /tmp/hardstop.o
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy .

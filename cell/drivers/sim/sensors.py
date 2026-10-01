@@ -90,7 +90,7 @@ class SimSensors:
         if not cutting:
             return SensorFrame(
                 now,
-                IDLE_CURRENT_A + self._gauss(CURRENT_NOISE_A),
+                max(0.0, IDLE_CURRENT_A + self._gauss(CURRENT_NOISE_A)),  # RMS is never < 0
                 IDLE_VIB_G + abs(self._gauss(VIB_NOISE_G)),
                 IDLE_AUDIO + abs(self._gauss(AUDIO_NOISE)),
             )

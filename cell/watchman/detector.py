@@ -30,10 +30,16 @@ from enum import Enum
 
 from cell.config import WatchmanConfig
 from cell.drivers.sensors import SensorFrame
+from cell.watchman.hardstop import (
+    HS_OVERLOAD,
+    HS_SENSOR_FAULT,
+    HS_TOOL_BREAK,
+    HardStop,
+    HardStopConfig,
+)
 from cell.watchman.reference import CycleStats, Reference
 
 _EPS = 1e-9
-_MIN_SETTLED_SAMPLES = 5
 
 
 class FindingKind(Enum):
@@ -42,6 +48,7 @@ class FindingKind(Enum):
     STALE = "stale"
     CHIP_BUILDUP = "chip_buildup"
     TOOL_WEAR = "tool_wear"
+    SENSOR_FAULT = "sensor_fault"  # invalid reading, ADC clipping, or flat vibration
 
 
 class Severity(Enum):
@@ -71,6 +78,7 @@ class Detector:
         self.set_reference(reference)
         self.last_cut: CycleStats | None = None  # stats of the most recent complete cut
         self.cuts_completed = 0
+        self._hs = HardStop(HardStopConfig.from_watchman(cfg))
         self._new_cut(start)
 
     def set_reference(self, reference: Reference | None) -> None:
@@ -81,10 +89,6 @@ class Detector:
 
     def _new_cut(self, now: float) -> None:
         self._cut_start = now
-        self._settled_sum = 0.0
-        self._settled_n = 0
-        self._below_since: float | None = None
-        self._over_since: float | None = None
         self._early: list[float] = []
         self._early_judged = False
         self._chip_max = 1.0
@@ -108,7 +112,17 @@ class Detector:
         if not fresh or frame is None:
             return out
 
-        # --- cut boundaries ---
+        a, v = frame.spindle_current_a, frame.vibration_rms_g
+        c = self._cfg
+
+        # --- hard-stop rules: the SAME code path as the node firmware (hardstop.py is the
+        # parity-tested reference for node/lib/hardstop). Every fresh frame goes through
+        # it so its timers see continuous time; the cut boundary comes from `cutting`.
+        ev = self._hs.step(round(now * 1000), a, v, False, 1 if cutting else 0)
+        if ev & HS_SENSOR_FAULT:
+            out.append(Finding(FindingKind.SENSOR_FAULT, Severity.ALERT, f"current {a} vib {v}"))
+
+        # --- cut boundaries (for the adaptive windows below) ---
         if cutting and not self._was_cutting:
             self._new_cut(now)
         if not cutting and self._was_cutting:
@@ -117,43 +131,21 @@ class Detector:
         if not cutting:
             return out
 
-        a, v = frame.spindle_current_a, frame.vibration_rms_g
-        c = self._cfg
-
-        # --- OVERLOAD: current or vibration above limit for the confirm window ---
-        over = a > c.overload_current_a or v > c.vibration_rms_max_g
-        if over:
-            self._over_since = now if self._over_since is None else self._over_since
-            if now - self._over_since >= c.overload_confirm_s - _EPS:
-                out.append(
-                    Finding(FindingKind.OVERLOAD, Severity.STOP, f"current {a:.1f}A vib {v:.2f}g")
+        if ev & HS_OVERLOAD:
+            out.append(
+                Finding(FindingKind.OVERLOAD, Severity.STOP, f"current {a:.1f}A vib {v:.2f}g")
+            )
+        if ev & HS_TOOL_BREAK:
+            out.append(
+                Finding(
+                    FindingKind.TOOL_BREAK,
+                    Severity.STOP,
+                    f"current {a:.1f}A vs cut mean {self._hs.cut_mean():.1f}A",
                 )
-        else:
-            self._over_since = None
+            )
 
         if now - self._cut_start < c.cut_settle_s - _EPS:
             return out
-
-        # --- TOOL_BREAK: current collapses vs. this cut's settled mean, for confirm window ---
-        below = False
-        if self._settled_n >= _MIN_SETTLED_SAMPLES:
-            mean = self._settled_sum / self._settled_n
-            below = a < c.tool_break_current_ratio * mean
-            if below:
-                self._below_since = now if self._below_since is None else self._below_since
-                if now - self._below_since >= c.tool_break_confirm_s - _EPS:
-                    out.append(
-                        Finding(
-                            FindingKind.TOOL_BREAK,
-                            Severity.STOP,
-                            f"current {a:.1f}A vs cut mean {mean:.1f}A",
-                        )
-                    )
-        if not below:
-            self._below_since = None
-            if not over:
-                self._settled_sum += a
-                self._settled_n += 1
 
         # --- CHIP_BUILDUP: recent window mean vs. this cut's early window mean ---
         settled_at = self._cut_start + c.cut_settle_s
