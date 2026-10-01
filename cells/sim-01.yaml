@@ -84,6 +84,7 @@ pins:
 watchman:
   sample_hz: 100
   stale_after_s: 0.5
+  cut_source: cnc  # robot cell: the machine's cycle signal says when it's cutting
   # Cut detection from spindle current (standalone node). Off < on (hysteresis); a long
   # off-confirm so a tool break (current collapses) is judged before the cut "ends".
   cut_on_current_a: 4.0
@@ -118,3 +119,9 @@ watchman:
   # ~x1.13 of a low-side reference; 0.12 produced a false wear alert. SET FROM M1 DATA.
   derived_min_margin: 0.15
   reference_store: data/references/sim-01.json
+  # Standalone-mode settings (unused with cut_source: cnc; see config/watchman-standalone.sim.yaml)
+  load_on_current_a: 5.0
+  load_off_current_a: 4.0
+  break_before_end_fraction: 0.8
+  air_cut_ratio: 0.4
+  air_cut_min_s: 3.0

@@ -16,11 +16,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Protocol
 
 from cell.clock import Clock
 from cell.config import CellConfig
 from cell.controller.alerts import Alert, Alerter
-from cell.drivers.cnc_io import CncIo
 from cell.drivers.sensors import Sensors
 from cell.log import get_logger
 from cell.watchman.detector import Detector, Finding, FindingKind, Severity
@@ -29,6 +29,15 @@ from cell.watchman.reference import CycleStats, Reference, ReferenceStore
 log = get_logger("cell.watchman")
 
 ALERT_STATE = "WATCHMAN"  # Alert.state for watchman alerts (controller alerts carry a state)
+
+
+class MachineLink(Protocol):
+    """What the watchman needs from the machine: CncIo on a robot cell, the node's
+    feed-hold relay on a standalone machine (cycle_running unused there)."""
+
+    def feed_hold(self) -> None: ...
+    def feed_hold_active(self) -> bool: ...
+    def cycle_running(self) -> bool: ...
 
 
 @dataclass
@@ -45,7 +54,7 @@ class Watchman:
         cfg: CellConfig,
         clock: Clock,
         sensors: Sensors,
-        cnc: CncIo,
+        cnc: MachineLink,
         request_safe: Callable[[str], None],
         alerter: Alerter,
         store: ReferenceStore | None = None,
@@ -75,13 +84,18 @@ class Watchman:
         now = self._clock.now()
         try:
             frame = self._sensors.read()
-            cutting = self._cnc.cycle_running() and not self._cnc.feed_hold_active()
+            # Standalone (cut_source "current"): no cut signal; the detector finds the
+            # spindle segment and load phase from current.
+            signal: bool | None = None
+            if self._cfg.watchman.cut_source == "cnc":
+                signal = self._cnc.cycle_running() and not self._cnc.feed_hold_active()
+            self._error = None
+            done_before = self._detector.cuts_completed
+            findings = self._detector.update(frame, now, signal)
+            cutting = self._detector.cutting
             if cutting and not self._was_cutting:
                 self._cut += 1
             self._was_cutting = cutting
-            self._error = None
-            done_before = self._detector.cuts_completed
-            findings = self._detector.update(frame, now, cutting)
             if findings:
                 self._findings_in_cut[self._cut] = True
             if self._detector.cuts_completed > done_before and self._detector.last_cut:

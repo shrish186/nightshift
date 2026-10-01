@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from cell.config import CellConfig, load_cell_config
@@ -219,3 +221,47 @@ def test_cut_detection_needs_hysteresis(sim_cell_raw: dict[str, Any]) -> None:
     raw["watchman"]["cut_off_current_a"] = raw["watchman"]["cut_on_current_a"]
     with pytest.raises(ValidationError, match="hysteresis"):
         CellConfig.model_validate(raw)
+
+
+STANDALONE = Path(__file__).resolve().parent.parent / "config" / "watchman-standalone.sim.yaml"
+
+
+def _standalone_raw() -> dict[str, Any]:
+    with open(STANDALONE) as f:
+        raw: dict[str, Any] = yaml.safe_load(f)["watchman"]
+    return raw
+
+
+def test_standalone_watchman_config_loads() -> None:
+    from cell.config import load_watchman_config
+
+    w = load_watchman_config(STANDALONE)
+    assert w.cut_source == "current" and w.cut_on_current_a < w.load_off_current_a
+
+
+@pytest.mark.parametrize("delta", [0.0, 0.5])
+def test_current_mode_rejects_break_confirm_not_shorter_than_cut_off(delta: float) -> None:
+    from cell.config import WatchmanConfig
+
+    raw = _standalone_raw()
+    raw["tool_break_confirm_s"] = raw["cut_off_confirm_s"] + delta
+    with pytest.raises(ValidationError, match="tool_break_confirm_s must be < cut_off_confirm_s"):
+        WatchmanConfig.model_validate(raw)
+
+
+def test_cnc_mode_does_not_apply_the_standalone_timing_rule() -> None:
+    from cell.config import WatchmanConfig
+
+    raw = _standalone_raw()
+    raw["cut_source"] = "cnc"
+    raw["tool_break_confirm_s"] = raw["cut_off_confirm_s"] + 0.5
+    WatchmanConfig.model_validate(raw)  # accepted: CNC says when the cut ends
+
+
+def test_current_mode_load_must_sit_above_spindle_running() -> None:
+    from cell.config import WatchmanConfig
+
+    raw = _standalone_raw()
+    raw["load_off_current_a"] = raw["cut_on_current_a"]
+    with pytest.raises(ValidationError, match="load_off_current_a must be > cut_on_current_a"):
+        WatchmanConfig.model_validate(raw)

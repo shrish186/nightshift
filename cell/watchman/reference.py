@@ -25,6 +25,10 @@ from cell.config import WatchmanConfig
 class CycleStats:
     level: float  # mean cutting current over the cut's early window
     chip_max: float  # highest recent/early ratio seen in the cut (1.0 if the cut was short)
+    # Load phase timing: load start -> load collapse (s), and spindle start -> load start
+    # (s, standalone only). None in references recorded before these existed.
+    load_s: float | None = None
+    load_start_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,19 @@ class Reference:
     @property
     def level_mean(self) -> float:
         return statistics.fmean(c.level for c in self.cycles)
+
+    @property
+    def min_load_s(self) -> float | None:
+        """Shortest reference load phase, or None if any cycle lacks timing."""
+        loads = [c.load_s for c in self.cycles]
+        return None if any(x is None for x in loads) else min(x for x in loads if x is not None)
+
+    @property
+    def max_load_start_s(self) -> float | None:
+        starts = [c.load_start_s for c in self.cycles]
+        if any(x is None for x in starts):
+            return None
+        return max(x for x in starts if x is not None)
 
     def limits(self, cfg: WatchmanConfig) -> Limits:
         levels = [c.level for c in self.cycles]

@@ -1,0 +1,35 @@
+# Watchman for a STANDALONE machine (no robot, no CNC I/O): the December pilot setup.
+# The node detects SPINDLE RUNNING from current (cut_on/off_current_a, just above
+# spindle-off current); the hub finds the LOAD PHASE inside it (load_on/off_current_a,
+# above spindle-idle current) and judges tool breaks against the program + tool
+# reference. ASSUMPTION / VERIFY ON HARDWARE: every value until makerspace data (W3).
+watchman:
+  sample_hz: 100
+  stale_after_s: 0.5
+  cut_source: current
+  cut_on_current_a: 1.8
+  cut_off_current_a: 1.2
+  cut_on_confirm_s: 0.3
+  cut_off_confirm_s: 2.0
+  vib_floor_g: 0.01
+  sensor_fault_confirm_s: 1.0
+  cut_settle_s: 1.0
+  tool_break_current_ratio: 0.5
+  tool_break_confirm_s: 0.3
+  overload_current_a: 25.0
+  vibration_rms_max_g: 3.0
+  overload_confirm_s: 0.3
+  chip_window_s: 2.0
+  chip_alert_ratio: 1.2
+  chip_stop_ratio: 1.5
+  wear_alert_ratio: 1.25
+  wear_stop_ratio: 1.5
+  reference_cycles: 5
+  derived_limit_sigmas: 4.0
+  derived_min_margin: 0.15
+  reference_store: data/references/standalone-sim.json
+  load_on_current_a: 5.0
+  load_off_current_a: 4.0
+  break_before_end_fraction: 0.8
+  air_cut_ratio: 0.4
+  air_cut_min_s: 3.0

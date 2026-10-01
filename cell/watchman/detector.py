@@ -31,6 +31,7 @@ from enum import Enum
 from cell.config import WatchmanConfig
 from cell.drivers.sensors import SensorFrame
 from cell.watchman.hardstop import (
+    HS_CUT_START,
     HS_OVERLOAD,
     HS_SENSOR_FAULT,
     HS_TOOL_BREAK,
@@ -79,7 +80,23 @@ class Detector:
         self.last_cut: CycleStats | None = None  # stats of the most recent complete cut
         self.cuts_completed = 0
         self._hs = HardStop(HardStopConfig.from_watchman(cfg))
+        # Standalone mode (cutting=None): spindle segment from the node rule, load phase
+        # tracked here. Times are onsets (first sample past the threshold).
+        self._seg_start = start
+        self._seg_loaded = False
+        self._air_alerted = False
+        self._in_load = False
+        self._load_on_since: float | None = None
+        self._load_off_since: float | None = None
+        self._load_start = start
+        self._load_start_s: float | None = None
+        self._load_s: float | None = None
         self._new_cut(start)
+
+    @property
+    def cutting(self) -> bool:
+        """In a cut (CNC mode) or a load phase (standalone) as of the last update."""
+        return self._was_cutting
 
     def set_reference(self, reference: Reference | None) -> None:
         """The confirmed reference for the active program + tool, or None. Without one,
@@ -94,7 +111,10 @@ class Detector:
         self._chip_max = 1.0
         self._recent: deque[tuple[float, float]] = deque()
 
-    def update(self, frame: SensorFrame | None, now: float, cutting: bool) -> list[Finding]:
+    def update(self, frame: SensorFrame | None, now: float, cutting: bool | None) -> list[Finding]:
+        """cutting: the machine's cut signal (robot cell / CNC), or None for a STANDALONE
+        machine, where the node detects spindle running and this detector finds the load
+        phase and judges it against the reference."""
         out: list[Finding] = []
 
         # --- STALE: no fresh frame within stale_after_s (including before the first) ---
@@ -118,9 +138,12 @@ class Detector:
         # --- hard-stop rules: the SAME code path as the node firmware (hardstop.py is the
         # parity-tested reference for node/lib/hardstop). Every fresh frame goes through
         # it so its timers see continuous time; the cut boundary comes from `cutting`.
-        ev = self._hs.step(round(now * 1000), a, v, False, 1 if cutting else 0)
+        hint = -1 if cutting is None else int(cutting)
+        ev = self._hs.step(round(now * 1000), a, v, False, hint)
         if ev & HS_SENSOR_FAULT:
             out.append(Finding(FindingKind.SENSOR_FAULT, Severity.ALERT, f"current {a} vib {v}"))
+        if cutting is None:
+            cutting = self._standalone_load(now, a, ev, out)
 
         # --- cut boundaries (for the adaptive windows below) ---
         if cutting and not self._was_cutting:
@@ -152,16 +175,16 @@ class Detector:
         if now < settled_at + c.chip_window_s:
             self._early.append(a)
         elif not self._early_judged:
-            # --- TOOL_BREAK before the cut: early level vs. the good-tool reference ---
+            # --- AIR CUT (a): this cut's early level far below the good-tool reference ---
             self._early_judged = True
             if self._early and self._ref is not None:
                 ratio = _mean(self._early) / self._ref.level_mean
-                if ratio < c.tool_break_current_ratio:
+                if ratio < c.air_cut_ratio:
                     out.append(
                         Finding(
                             FindingKind.TOOL_BREAK,
                             Severity.STOP,
-                            f"cut load x{ratio:.2f} of reference from the start",
+                            f"air cut: load x{ratio:.2f} of reference: tool broken or missing",
                         )
                     )
         self._recent.append((now, a))
@@ -181,6 +204,71 @@ class Detector:
                 )
         return out
 
+    def _standalone_load(self, now: float, a: float, ev: int, out: list[Finding]) -> bool:
+        """Standalone mode: track the load phase inside the node's spindle segment and
+        judge its end against the reference. Returns whether the load phase is on."""
+        c = self._cfg
+        spindle = self._hs.cutting
+        if ev & HS_CUT_START:
+            self._seg_start, self._seg_loaded, self._air_alerted = now, False, False
+        if not self._in_load:
+            self._load_off_since = None
+            if spindle and a > c.load_on_current_a:
+                self._load_on_since = now if self._load_on_since is None else self._load_on_since
+                if now - self._load_on_since >= c.cut_on_confirm_s - _EPS:
+                    self._in_load, self._seg_loaded = True, True
+                    self._load_start = self._load_on_since
+                    self._load_start_s = self._load_on_since - self._seg_start
+            else:
+                self._load_on_since = None
+            # AIR CUT (b): spindle running well past the expected load start, no load.
+            ref = self._ref
+            if (
+                spindle
+                and not self._seg_loaded
+                and not self._air_alerted
+                and ref is not None
+                and ref.max_load_start_s is not None
+                and now - self._seg_start >= ref.max_load_start_s + c.air_cut_min_s - _EPS
+            ):
+                self._air_alerted = True
+                out.append(
+                    Finding(
+                        FindingKind.TOOL_BREAK,
+                        Severity.STOP,
+                        f"air cut: no load after {now - self._seg_start:.1f}s of spindle "
+                        f"(reference loads by {ref.max_load_start_s:.1f}s): tool broken or missing",
+                    )
+                )
+            return self._in_load
+        # in a load phase: it ends when current stays below load_off (or the spindle stops)
+        self._load_on_since = None
+        if (not spindle) or a < c.load_off_current_a:
+            self._load_off_since = now if self._load_off_since is None else self._load_off_since
+            if now - self._load_off_since >= c.tool_break_confirm_s - _EPS:
+                self._in_load = False
+                self._load_s = self._load_off_since - self._load_start
+                self._judge_load_end(self._load_s, out)
+        else:
+            self._load_off_since = None
+        return self._in_load
+
+    def _judge_load_end(self, load_s: float, out: list[Finding]) -> None:
+        """Load collapsed after load_s. Well before the reference's shortest load phase =
+        tool break; at the expected end = a normal retract. No reference: not judged."""
+        ref = self._ref
+        if ref is None or ref.min_load_s is None:
+            return
+        limit = self._cfg.break_before_end_fraction * ref.min_load_s
+        if load_s < limit:
+            out.append(
+                Finding(
+                    FindingKind.TOOL_BREAK,
+                    Severity.STOP,
+                    f"load ended after {load_s:.1f}s, reference cut >= {ref.min_load_s:.1f}s",
+                )
+            )
+
     def _end_of_cut(self) -> list[Finding]:
         """Record this cut's stats; TOOL_WEAR: its early level vs. the reference."""
         c = self._cfg
@@ -188,7 +276,11 @@ class Detector:
         if not self._early or self._last_ts is None or self._last_ts < complete:
             return []  # cut too short to judge
         level = _mean(self._early)
-        self.last_cut = CycleStats(level, self._chip_max)
+        if self._cfg.cut_source == "current":
+            load_s, load_start_s = self._load_s, self._load_start_s
+        else:
+            load_s, load_start_s = self._last_ts - self._cut_start, 0.0
+        self.last_cut = CycleStats(level, self._chip_max, load_s, load_start_s)
         self.cuts_completed += 1
         if self._ref is None or self._limits is None:
             return []

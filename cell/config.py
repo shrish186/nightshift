@@ -178,6 +178,11 @@ class WatchmanConfig(_Strict):
 
     sample_hz: float = Field(gt=0)
     stale_after_s: float = Field(gt=0)
+    # Where "cutting" comes from: "cnc" = the machine's cycle signal (robot cell);
+    # "current" = current alone (standalone node, no CNC I/O). In "current" mode the
+    # node's cut_on/off thresholds mean SPINDLE RUNNING, and the hub finds the load
+    # phase inside it with load_on/off_current_a.
+    cut_source: Literal["cnc", "current"]
     # Cut detection from current alone (standalone node, no CNC I/O), with hysteresis.
     cut_on_current_a: float = Field(gt=0)
     cut_off_current_a: float = Field(gt=0)
@@ -206,6 +211,38 @@ class WatchmanConfig(_Strict):
     derived_limit_sigmas: float = Field(gt=0)
     derived_min_margin: float = Field(gt=0)
     reference_store: str  # JSON file of recorded references (under data/, not in git)
+    # Standalone ("current") mode, judged on the hub against the program + tool reference:
+    # load phase = current above load_on (held cut_on_confirm_s) until below load_off
+    # (held tool_break_confirm_s). A load phase that ends before
+    # break_before_end_fraction x the reference's shortest load phase = tool break.
+    # KNOWN LIMIT: a break in the last (1 - fraction) of the cut looks like a normal end;
+    # the next cycle's air-cut check catches it.
+    load_on_current_a: float = Field(gt=0)
+    load_off_current_a: float = Field(gt=0)
+    break_before_end_fraction: float = Field(gt=0, lt=1)
+    # Air cut (tool broken or missing): a load phase whose early level is below
+    # air_cut_ratio x the reference level, or (standalone) the spindle running
+    # air_cut_min_s past the reference's latest load start with no load at all.
+    air_cut_ratio: float = Field(gt=0, lt=1)
+    air_cut_min_s: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _standalone_timing(self) -> WatchmanConfig:
+        if self.load_off_current_a >= self.load_on_current_a:
+            raise ValueError("load_off_current_a must be < load_on_current_a (hysteresis)")
+        if self.cut_source == "current":
+            # A load collapse must be confirmable before the node declares the spindle
+            # segment over, or the hub could never judge it.
+            if self.tool_break_confirm_s >= self.cut_off_confirm_s:
+                raise ValueError(
+                    "with cut_source 'current', tool_break_confirm_s must be < cut_off_confirm_s"
+                )
+            if self.load_off_current_a <= self.cut_on_current_a:
+                raise ValueError(
+                    "with cut_source 'current', load_off_current_a must be > cut_on_current_a"
+                    " (load sits above spindle-running current)"
+                )
+        return self
 
     @model_validator(mode="after")
     def _cut_hysteresis(self) -> WatchmanConfig:
@@ -306,6 +343,12 @@ class CellConfig(_Strict):
                     f"unclamp_fallback.pull_pose {self.unclamp_fallback.pull_pose!r} not in poses"
                 )
         return self
+
+
+def load_watchman_config(path: str | Path) -> WatchmanConfig:
+    """A watchman-only config (standalone machine: no robot, poses or CNC I/O)."""
+    with open(path) as f:
+        return WatchmanConfig.model_validate(yaml.safe_load(f)["watchman"])
 
 
 def load_cell_config(path: str | Path) -> CellConfig:
