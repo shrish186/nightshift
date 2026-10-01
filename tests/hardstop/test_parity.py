@@ -52,6 +52,9 @@ def test_cut_mean_matches(dll: ctypes.CDLL, hcfg: HardStopConfig) -> None:
 def test_rms_bit_identical(dll: ctypes.CDLL) -> None:
     rng = random.Random(1)
     cases = [[], [0], [32767] * 5, [-32768, 32767, 0], list(range(-100, 100))]
+    # Summation order matters here: past 2**24 float32 can't represent +1, so a
+    # sequential sum drops the trailing ones and a pairwise sum keeps them.
+    cases.append([32767] * 520 + [1] * 1000)
     for n in (1, 7, 64, 860, 3200):
         cases.append([rng.randint(-32768, 32767) for _ in range(n)])
         cases.append([int(8000 * np.sin(2 * np.pi * 50 * k / 860)) + 120 for k in range(n)])
