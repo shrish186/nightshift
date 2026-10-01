@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from cell.clock import SimClock
+from cell.drivers.sensors import SensorFrame
 from cell.drivers.sim.sensors import SensorFault, SimSensors
 from cell.watchman.hardstop import HardStopConfig
 
@@ -81,6 +82,27 @@ def sim_streams() -> list[Stream]:
               SensorFault.TOOL_WEAR]  # fmt: skip
     out = [sim_stream(seed, f, hint) for seed in range(3) for f in faults for hint in (False, True)]
     out += [sim_stream(9, SensorFault.TOOL_BREAK, False, t0=WRAP - 30_000)]  # wraps mid-run
+    out += standalone_streams()
+    return out
+
+
+def standalone_streams() -> list[Stream]:
+    """Realistic standalone-machine cycles (no CNC signal: hint -1), clean and faulted."""
+    from cell.drivers.sim.standalone import StandaloneMachine
+
+    out = []
+    for seed in range(4):
+        m = StandaloneMachine(seed=seed)
+        s = Stream(f"standalone-s{seed}")
+        plans = [m.plan(), m.plan(break_at=0.4), m.plan(), m.plan(air_cut=True),
+                 m.plan(jam_at=0.6), m.plan()]  # fmt: skip
+
+        def add(f: SensorFrame, s: Stream = s) -> None:
+            s.add(round(f.ts * 1000), f.spindle_current_a, f.vibration_rms_g)
+
+        for p in plans:
+            m.run_cycle(p, add)
+        out.append(s)
     return out
 
 
