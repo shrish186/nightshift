@@ -212,3 +212,10 @@ def test_door_zone_interlock_must_be_fitted(sim_cell_raw: dict[str, Any]) -> Non
     raw["safety"]["door_zone_interlock"] = False
     with pytest.raises(ValidationError, match="door_zone_interlock"):
         CellConfig.model_validate(raw)
+
+
+def test_cut_detection_needs_hysteresis(sim_cell_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(sim_cell_raw)
+    raw["watchman"]["cut_off_current_a"] = raw["watchman"]["cut_on_current_a"]
+    with pytest.raises(ValidationError, match="hysteresis"):
+        CellConfig.model_validate(raw)

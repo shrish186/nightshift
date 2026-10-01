@@ -1,0 +1,803 @@
+{
+ "config": {
+  "cut_on_a": 4.0,
+  "cut_off_a": 2.0,
+  "cut_on_ms": 300,
+  "cut_off_ms": 2000,
+  "settle_ms": 1000,
+  "break_ratio": 0.5,
+  "break_confirm_ms": 300,
+  "min_settled": 5,
+  "overload_a": 25.0,
+  "vib_max_g": 3.0,
+  "overload_confirm_ms": 300,
+  "vib_floor_g": 0.01,
+  "sensor_fault_ms": 1000
+ },
+ "streams": {
+  "edge-cut-on-threshold": {
+   "steps": 40,
+   "counts": {
+    "CUT_START": 1,
+    "CUT_END": 0,
+    "OVERLOAD": 0,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 0
+   },
+   "sha256": "d080c63e81c76036777536e7d5dec47e33ddc8ce6d46f5139e7294455bc602ad",
+   "events": [
+    [
+     23,
+     1
+    ]
+   ]
+  },
+  "edge-cut-on-confirm-short": {
+   "steps": 4,
+   "counts": {
+    "CUT_START": 0,
+    "CUT_END": 0,
+    "OVERLOAD": 0,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 0
+   },
+   "sha256": "a90d007c2fc57df6e0f2928df79a54a9677f79afcbd89399d8a7da5010264237",
+   "events": []
+  },
+  "edge-cut-on-confirm-exact": {
+   "steps": 4,
+   "counts": {
+    "CUT_START": 1,
+    "CUT_END": 0,
+    "OVERLOAD": 0,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 0
+   },
+   "sha256": "2c24932e8e4ebc2fc47629e5785874bc1fdad752b5da17589ceef02f5e7d28ac",
+   "events": [
+    [
+     2,
+     1
+    ]
+   ]
+  },
+  "edge-cut-off": {
+   "steps": 110,
+   "counts": {
+    "CUT_START": 1,
+    "CUT_END": 1,
+    "OVERLOAD": 0,
+    "TOOL_BREAK": 77,
+    "SENSOR_FAULT": 0
+   },
+   "sha256": "1e1d21ad133db968bc554d04ea36fed226eab51028699c1434735992281a988f",
+   "events": [
+    [
+     3,
+     1
+    ],
+    [
+     23,
+     8
+    ],
+    [
+     24,
+     8
+    ],
+    [
+     25,
+     8
+    ],
+    [
+     26,
+     8
+    ],
+    [
+     27,
+     8
+    ],
+    [
+     28,
+     8
+    ],
+    [
+     29,
+     8
+    ],
+    [
+     30,
+     8
+    ],
+    [
+     31,
+     8
+    ],
+    [
+     32,
+     8
+    ],
+    [
+     33,
+     8
+    ],
+    [
+     34,
+     8
+    ],
+    [
+     35,
+     8
+    ],
+    [
+     36,
+     8
+    ],
+    [
+     37,
+     8
+    ],
+    [
+     38,
+     8
+    ],
+    [
+     39,
+     8
+    ],
+    [
+     40,
+     8
+    ],
+    [
+     41,
+     8
+    ],
+    [
+     42,
+     8
+    ],
+    [
+     43,
+     8
+    ],
+    [
+     44,
+     8
+    ],
+    [
+     45,
+     8
+    ],
+    [
+     46,
+     8
+    ],
+    [
+     47,
+     8
+    ],
+    [
+     48,
+     8
+    ],
+    [
+     49,
+     8
+    ],
+    [
+     50,
+     8
+    ],
+    [
+     51,
+     8
+    ],
+    [
+     52,
+     8
+    ],
+    [
+     53,
+     8
+    ],
+    [
+     54,
+     8
+    ],
+    [
+     55,
+     8
+    ],
+    [
+     56,
+     8
+    ],
+    [
+     57,
+     8
+    ],
+    [
+     58,
+     8
+    ],
+    [
+     59,
+     8
+    ],
+    [
+     60,
+     8
+    ],
+    [
+     61,
+     8
+    ],
+    [
+     62,
+     8
+    ],
+    [
+     63,
+     8
+    ],
+    [
+     64,
+     8
+    ],
+    [
+     65,
+     8
+    ],
+    [
+     66,
+     8
+    ],
+    [
+     67,
+     8
+    ],
+    [
+     68,
+     8
+    ],
+    [
+     69,
+     8
+    ],
+    [
+     70,
+     8
+    ],
+    [
+     71,
+     8
+    ],
+    [
+     72,
+     8
+    ],
+    [
+     73,
+     8
+    ],
+    [
+     74,
+     8
+    ],
+    [
+     75,
+     8
+    ],
+    [
+     76,
+     8
+    ],
+    [
+     77,
+     8
+    ],
+    [
+     78,
+     8
+    ],
+    [
+     79,
+     8
+    ],
+    [
+     80,
+     8
+    ],
+    [
+     81,
+     8
+    ],
+    [
+     82,
+     8
+    ],
+    [
+     83,
+     8
+    ],
+    [
+     84,
+     8
+    ],
+    [
+     85,
+     8
+    ],
+    [
+     86,
+     8
+    ],
+    [
+     87,
+     8
+    ],
+    [
+     88,
+     8
+    ],
+    [
+     89,
+     8
+    ],
+    [
+     90,
+     8
+    ],
+    [
+     91,
+     8
+    ],
+    [
+     92,
+     8
+    ],
+    [
+     93,
+     8
+    ],
+    [
+     94,
+     8
+    ],
+    [
+     95,
+     8
+    ],
+    [
+     96,
+     8
+    ],
+    [
+     97,
+     8
+    ],
+    [
+     98,
+     8
+    ],
+    [
+     99,
+     8
+    ],
+    [
+     100,
+     2
+    ]
+   ]
+  },
+  "edge-overload-current": {
+   "steps": 50,
+   "counts": {
+    "CUT_START": 1,
+    "CUT_END": 0,
+    "OVERLOAD": 1,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 0
+   },
+   "sha256": "0c7c4239927bb58eac7e89e05b82b8c3e5f11575d12fd2707b1d7a4c74ee1933",
+   "events": [
+    [
+     3,
+     1
+    ],
+    [
+     49,
+     4
+    ]
+   ]
+  },
+  "edge-overload-vibration": {
+   "steps": 50,
+   "counts": {
+    "CUT_START": 1,
+    "CUT_END": 0,
+    "OVERLOAD": 7,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 0
+   },
+   "sha256": "108c90804f9a922caa49917cc8d88252b1149ff116dee1f961933f17c1b2effe",
+   "events": [
+    [
+     3,
+     1
+    ],
+    [
+     43,
+     4
+    ],
+    [
+     44,
+     4
+    ],
+    [
+     45,
+     4
+    ],
+    [
+     46,
+     4
+    ],
+    [
+     47,
+     4
+    ],
+    [
+     48,
+     4
+    ],
+    [
+     49,
+     4
+    ]
+   ]
+  },
+  "edge-tool-break-at-limit": {
+   "steps": 43,
+   "counts": {
+    "CUT_START": 1,
+    "CUT_END": 0,
+    "OVERLOAD": 0,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 0
+   },
+   "sha256": "919f2b57215ea340e93eef3862a728efd78fa02c75cc40d937bd66812a644a3e",
+   "events": [
+    [
+     3,
+     1
+    ]
+   ]
+  },
+  "edge-tool-break-below": {
+   "steps": 36,
+   "counts": {
+    "CUT_START": 1,
+    "CUT_END": 0,
+    "OVERLOAD": 0,
+    "TOOL_BREAK": 3,
+    "SENSOR_FAULT": 0
+   },
+   "sha256": "fa1bbe6597bdec15b7be885d8340bafe4df37b1c2b99ec51c92378c803e8693c",
+   "events": [
+    [
+     3,
+     1
+    ],
+    [
+     33,
+     8
+    ],
+    [
+     34,
+     8
+    ],
+    [
+     35,
+     8
+    ]
+   ]
+  },
+  "edge-break-during-settle": {
+   "steps": 24,
+   "counts": {
+    "CUT_START": 1,
+    "CUT_END": 0,
+    "OVERLOAD": 0,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 0
+   },
+   "sha256": "aba3c491483b1568cec1d089bb0b05af85520170c8ea21853a5ced67950e043d",
+   "events": [
+    [
+     3,
+     1
+    ]
+   ]
+  },
+  "edge-cut-ends-mid-confirm": {
+   "steps": 34,
+   "counts": {
+    "CUT_START": 2,
+    "CUT_END": 1,
+    "OVERLOAD": 0,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 0
+   },
+   "sha256": "2fa637ce506340f372b75db70e90917eda800eb22af62989f169e93ca3118613",
+   "events": [
+    [
+     0,
+     1
+    ],
+    [
+     31,
+     2
+    ],
+    [
+     32,
+     1
+    ]
+   ]
+  },
+  "edge-invalid-inputs": {
+   "steps": 27,
+   "counts": {
+    "CUT_START": 1,
+    "CUT_END": 0,
+    "OVERLOAD": 0,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 6
+   },
+   "sha256": "6f0e49b871a36358b7f180d480b62fa242cdecd4939e228848a1a6efb0dafa73",
+   "events": [
+    [
+     3,
+     1
+    ],
+    [
+     20,
+     16
+    ],
+    [
+     21,
+     16
+    ],
+    [
+     22,
+     16
+    ],
+    [
+     23,
+     16
+    ],
+    [
+     24,
+     16
+    ],
+    [
+     25,
+     16
+    ]
+   ]
+  },
+  "edge-sensor-faults": {
+   "steps": 53,
+   "counts": {
+    "CUT_START": 1,
+    "CUT_END": 0,
+    "OVERLOAD": 0,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 8
+   },
+   "sha256": "6b91201f9da6eaad87f942d4786b6f01c9a70fd1aedee3bb55970db271ac7f70",
+   "events": [
+    [
+     3,
+     1
+    ],
+    [
+     30,
+     16
+    ],
+    [
+     31,
+     16
+    ],
+    [
+     32,
+     16
+    ],
+    [
+     33,
+     16
+    ],
+    [
+     34,
+     16
+    ],
+    [
+     50,
+     16
+    ],
+    [
+     51,
+     16
+    ],
+    [
+     52,
+     16
+    ]
+   ]
+  },
+  "edge-wraparound": {
+   "steps": 35,
+   "counts": {
+    "CUT_START": 1,
+    "CUT_END": 0,
+    "OVERLOAD": 0,
+    "TOOL_BREAK": 4,
+    "SENSOR_FAULT": 0
+   },
+   "sha256": "59777af2b8776e2febb8e7ebea6302d13b925687069d7c8baf0976e5578fcfd7",
+   "events": [
+    [
+     3,
+     1
+    ],
+    [
+     31,
+     8
+    ],
+    [
+     32,
+     8
+    ],
+    [
+     33,
+     8
+    ],
+    [
+     34,
+     8
+    ]
+   ]
+  },
+  "fuzz-0": {
+   "steps": 3000,
+   "counts": {
+    "CUT_START": 625,
+    "CUT_END": 624,
+    "OVERLOAD": 529,
+    "TOOL_BREAK": 8,
+    "SENSOR_FAULT": 41
+   },
+   "sha256": "8ded1420a9c60a8e135d65b2e3c9bf90ce66a91b45ed5c909d1fff4e9775cd9e"
+  },
+  "fuzz-1": {
+   "steps": 3000,
+   "counts": {
+    "CUT_START": 601,
+    "CUT_END": 600,
+    "OVERLOAD": 494,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 102
+   },
+   "sha256": "3c83b6c4fb1e68e7779f679f25a37a1a45c2e0e616cefffd7d316f2a83ce9afd"
+  },
+  "fuzz-2": {
+   "steps": 3000,
+   "counts": {
+    "CUT_START": 6,
+    "CUT_END": 5,
+    "OVERLOAD": 1724,
+    "TOOL_BREAK": 399,
+    "SENSOR_FAULT": 110
+   },
+   "sha256": "6f45cc910b9ebf69ab27b00309382e2f910456cc7676f8009b1e4cf7f97d875d"
+  },
+  "fuzz-3": {
+   "steps": 3000,
+   "counts": {
+    "CUT_START": 608,
+    "CUT_END": 607,
+    "OVERLOAD": 544,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 62
+   },
+   "sha256": "71fd338ce68921d8c3e11239933bef850cb46937cfa232912e17d2ff5cbf3396"
+  },
+  "fuzz-4": {
+   "steps": 3000,
+   "counts": {
+    "CUT_START": 607,
+    "CUT_END": 606,
+    "OVERLOAD": 459,
+    "TOOL_BREAK": 2,
+    "SENSOR_FAULT": 134
+   },
+   "sha256": "0e8c7df87b85a13a071b23f0310aaaa3ce9210f4014628121c944c4acba0bd78"
+  },
+  "fuzz-5": {
+   "steps": 3000,
+   "counts": {
+    "CUT_START": 626,
+    "CUT_END": 625,
+    "OVERLOAD": 572,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 104
+   },
+   "sha256": "ced23b59d7eaa4e75d4182b135af3dd5a9e5228f347f26a86564a3041e61c2ee"
+  },
+  "fuzz-6": {
+   "steps": 3000,
+   "counts": {
+    "CUT_START": 635,
+    "CUT_END": 635,
+    "OVERLOAD": 454,
+    "TOOL_BREAK": 1,
+    "SENSOR_FAULT": 20
+   },
+   "sha256": "fdfb1296a2c5168cfa67a3f30b160976e5b210ff7356f8760ca8a49b2380fe93"
+  },
+  "fuzz-7": {
+   "steps": 3000,
+   "counts": {
+    "CUT_START": 6,
+    "CUT_END": 5,
+    "OVERLOAD": 1809,
+    "TOOL_BREAK": 139,
+    "SENSOR_FAULT": 347
+   },
+   "sha256": "0c34ff6ef552a76f68f53dbdf30a6cd411b7946502d9422ebfa8d512e5b2232e"
+  },
+  "fuzz-8": {
+   "steps": 3000,
+   "counts": {
+    "CUT_START": 594,
+    "CUT_END": 593,
+    "OVERLOAD": 545,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 194
+   },
+   "sha256": "e4c9d9fa00209cfb70c1dadd9511e6238f544ab68a01297b763bf0e19c01f4fc"
+  },
+  "fuzz-9": {
+   "steps": 3000,
+   "counts": {
+    "CUT_START": 552,
+    "CUT_END": 551,
+    "OVERLOAD": 464,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 378
+   },
+   "sha256": "6414380be2cb418031fecb28444db8a38b0a0648469537a033f908a05236c699"
+  },
+  "fuzz-10": {
+   "steps": 3000,
+   "counts": {
+    "CUT_START": 541,
+    "CUT_END": 540,
+    "OVERLOAD": 544,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 367
+   },
+   "sha256": "a2b92da650b0412e111c52ef0e0bde28e2e1368cab54311b8de1f75766cdb31a"
+  },
+  "fuzz-11": {
+   "steps": 3000,
+   "counts": {
+    "CUT_START": 617,
+    "CUT_END": 616,
+    "OVERLOAD": 437,
+    "TOOL_BREAK": 0,
+    "SENSOR_FAULT": 218
+   },
+   "sha256": "119984df403ebb19a16af7e8cd2d6ff56a23cd718fec890c597ce478f3339494"
+  }
+ }
+}

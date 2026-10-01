@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol, TypeAlias
+from typing import Protocol
 
 from cell.clock import Clock
 from cell.config import CellConfig, ProgramConfig
@@ -104,10 +104,10 @@ class Require:
     cond: Callable[[Ctx], bool]
 
 
-Step: TypeAlias = Move | MoveLimited | Command | WaitUntil | Dwell | Require | Tug
+type Step = Move | MoveLimited | Command | WaitUntil | Dwell | Require | Tug
 
 # A guard returns None when OK, or the reason it failed.
-Guard: TypeAlias = Callable[[Ctx], str | None]
+type Guard = Callable[[Ctx], str | None]
 
 
 @dataclass(frozen=True)

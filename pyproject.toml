@@ -2,8 +2,8 @@
 name = "nightshift"
 version = "0.0.1"
 description = "Retrofit robot cell + AI watchman for CNC machines"
-requires-python = ">=3.11"
-dependencies = ["pydantic>=2.7", "pyyaml>=6", "rich>=13"]
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.7", "pyyaml>=6", "rich>=13", "numpy>=1.26"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "hypothesis>=6", "ruff>=0.5", "mypy>=1.10", "types-PyYAML"]
@@ -17,13 +17,13 @@ include = ["cell*", "telemetry*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 exclude = ["^\\.venv/"]

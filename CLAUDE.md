@@ -42,7 +42,7 @@ A retrofit robot cell that loads/unloads existing CNC lathes and VMCs overnight 
 - Every safety or hard-stop rule gets a mutant: switch it off and prove a test fails. Commit before mutation runs; restore mutated files from a backup, never with `git checkout`.
 
 ## Conventions
-- Python 3.11+, type hints everywhere, `ruff` + `mypy`, `pytest`.
+- Python 3.12+ (the hub runs in Docker), type hints everywhere, `ruff` + `mypy`, `pytest`.
 - Tests first for state-machine behavior. Fault injection tests live in `tests/faults/`.
 - Sensor data is saved as Parquet with a sidecar JSON of machine, tool, material and labels. Raw data goes in `data/` (git-ignored).
 - Config in YAML per cell (`cells/<cell-id>.yaml`); no hardcoded poses, timeouts or pin numbers in code.

@@ -84,6 +84,15 @@ pins:
 watchman:
   sample_hz: 100
   stale_after_s: 0.5
+  # Cut detection from spindle current (standalone node). Off < on (hysteresis); a long
+  # off-confirm so a tool break (current collapses) is judged before the cut "ends".
+  cut_on_current_a: 4.0
+  cut_off_current_a: 2.0
+  cut_on_confirm_s: 0.3
+  cut_off_confirm_s: 2.0
+  # Sensor fault: ADC clipping, or vibration this low while cutting (sensor off/dead).
+  vib_floor_g: 0.01
+  sensor_fault_confirm_s: 1.0
   cut_settle_s: 1.0
   # STOP: cutting current below this fraction of this cycle's settled mean, for confirm_s.
   tool_break_current_ratio: 0.5

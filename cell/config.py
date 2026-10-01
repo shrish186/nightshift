@@ -178,6 +178,15 @@ class WatchmanConfig(_Strict):
 
     sample_hz: float = Field(gt=0)
     stale_after_s: float = Field(gt=0)
+    # Cut detection from current alone (standalone node, no CNC I/O), with hysteresis.
+    cut_on_current_a: float = Field(gt=0)
+    cut_off_current_a: float = Field(gt=0)
+    cut_on_confirm_s: float = Field(gt=0)
+    cut_off_confirm_s: float = Field(gt=0)
+    # Sensor fault: current ADC clipping, or vibration below vib_floor_g while cutting,
+    # held for sensor_fault_confirm_s.
+    vib_floor_g: float = Field(gt=0)
+    sensor_fault_confirm_s: float = Field(gt=0)
     cut_settle_s: float = Field(ge=0)  # ignore spindle ramp-up at the start of each cut
     tool_break_current_ratio: float = Field(gt=0, lt=1)
     tool_break_confirm_s: float = Field(gt=0)
@@ -197,6 +206,14 @@ class WatchmanConfig(_Strict):
     derived_limit_sigmas: float = Field(gt=0)
     derived_min_margin: float = Field(gt=0)
     reference_store: str  # JSON file of recorded references (under data/, not in git)
+
+    @model_validator(mode="after")
+    def _cut_hysteresis(self) -> WatchmanConfig:
+        if self.cut_off_current_a >= self.cut_on_current_a:
+            raise ValueError("cut_off_current_a must be < cut_on_current_a (hysteresis)")
+        if self.vib_floor_g >= self.vibration_rms_max_g:
+            raise ValueError("vib_floor_g must be < vibration_rms_max_g")
+        return self
 
     @model_validator(mode="after")
     def _stop_above_alert(self) -> WatchmanConfig:
